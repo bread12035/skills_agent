@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skills-agent"
+version = "1.0.0"
+description = "Claude Skills Agentic Executor - Evaluator-Optimizer Loop managed by LangGraph"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=3.0.0",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+skills-agent = "skills_agent.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skills_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
