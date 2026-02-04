@@ -1,0 +1,119 @@
+# Tool Security Gateway — Parametric Whitelist Configuration
+# Each entry defines a whitelisted command template with regex-validated parameters.
+
+cli_whitelist:
+  list_files:
+    description: "List files and directories"
+    template: "ls -la {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  read_file:
+    description: "Read file contents"
+    template: "cat {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  search_text:
+    description: "Search for text patterns in files"
+    template: "grep -rn {pattern} {path}"
+    params:
+      pattern: "^[a-zA-Z0-9_.* -]+$"
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 30
+
+  git_status:
+    description: "Show git working tree status"
+    template: "git status"
+    params: {}
+    timeout: 10
+
+  git_diff:
+    description: "Show git diff"
+    template: "git diff {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]*$"
+    timeout: 10
+
+  git_add:
+    description: "Stage files for commit"
+    template: "git add {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  git_commit:
+    description: "Create a git commit"
+    template: "git commit -m {message}"
+    params:
+      message: "^[a-zA-Z0-9_ .,:;!?()-]+$"
+    timeout: 15
+
+  make_directory:
+    description: "Create a directory"
+    template: "mkdir -p {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  tree:
+    description: "Show directory tree"
+    template: "tree {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]*$"
+    timeout: 10
+
+  head_file:
+    description: "Show first N lines of a file"
+    template: "head -n {lines} {path}"
+    params:
+      lines: "^[0-9]+$"
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  tail_file:
+    description: "Show last N lines of a file"
+    template: "tail -n {lines} {path}"
+    params:
+      lines: "^[0-9]+$"
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  word_count:
+    description: "Count lines, words, characters in a file"
+    template: "wc {path}"
+    params:
+      path: "^[a-zA-Z0-9_./-]+$"
+    timeout: 10
+
+  pip_install:
+    description: "Install a Python package"
+    template: "pip install {package}"
+    params:
+      package: "^[a-zA-Z0-9_.=-]+$"
+    timeout: 120
+
+  python_run:
+    description: "Run a Python script from the scripts/ directory"
+    template: "python {script}"
+    params:
+      script: "^scripts/[a-zA-Z0-9_/-]+\\.py$"
+    timeout: 120
+
+# Blocked patterns — commands that must NEVER be executed
+blocked_patterns:
+  - "rm\\s+-rf"
+  - "rm\\s+-r"
+  - "rmdir"
+  - "mkfs"
+  - "dd\\s+if="
+  - ":(){:|:&};:"
+  - "chmod\\s+777"
+  - "curl.*\\|.*sh"
+  - "wget.*\\|.*sh"
+  - "eval\\("
+  - "__import__"
+  - "os\\.system"
+  - "subprocess"
