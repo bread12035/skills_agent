@@ -4,7 +4,7 @@ Nodes:
     1. skill_parser       — parse user input into a SkillPlan
     2. prepare_step_context — prepare context for the next step
     3. optimizer_agent     — execute the step using tools
-    4. evaluator_agent     — verify step completion
+    4. evaluator_agent     — verify step completion (with tool execution loop)
     5. commit_step         — persist outputs and advance index
 """
 
@@ -12,15 +12,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.prebuilt import ToolNode
+from openai import OpenAI
 
 from skills_agent.memory import (
     append_skill_memory,
-    clear_loop_messages,
     format_skill_memory,
     load_global_context,
 )
@@ -36,19 +36,123 @@ from skills_agent.prompts import (
     OPTIMIZER_SYSTEM,
     SKILL_PARSER_SYSTEM,
 )
-from skills_agent.tools import ALL_TOOLS, READONLY_TOOLS, get_tool_descriptions
+from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, get_tool_descriptions
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# LLM instances
+# OpenAI Client
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
+def setup_openai_client() -> OpenAI:
+    """Create and return an OpenAI client from environment variables.
+
+    Required env vars:
+        OPENAI_API_KEY  — API key for OpenAI (or compatible) service
+
+    Optional env vars:
+        OPENAI_BASE_URL — Custom API base URL (for OpenAI-compatible services)
+    """
+    return OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL"),
+    )
 
 
-def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatAnthropic:
-    return ChatAnthropic(model=model, **kwargs)
+_client: OpenAI | None = None
+
+
+def _get_client() -> OpenAI:
+    """Return the singleton OpenAI client (lazy-initialized)."""
+    global _client
+    if _client is None:
+        _client = setup_openai_client()
+    return _client
+
+
+def _get_model() -> str:
+    """Return the model name from OPENAI_MODEL env var (default: gpt-4o)."""
+    return os.getenv("OPENAI_MODEL", "gpt-4o")
+
+
+# ---------------------------------------------------------------------------
+# Message format conversion helpers
+# ---------------------------------------------------------------------------
+
+
+def _langchain_to_openai_messages(messages: list) -> list[dict[str, Any]]:
+    """Convert a list of LangChain messages to OpenAI chat completion format."""
+    result: list[dict[str, Any]] = []
+    for m in messages:
+        if isinstance(m, SystemMessage):
+            result.append({"role": "system", "content": m.content})
+        elif isinstance(m, HumanMessage):
+            result.append({"role": "user", "content": m.content})
+        elif isinstance(m, AIMessage):
+            msg: dict[str, Any] = {"role": "assistant"}
+            if m.tool_calls:
+                msg["tool_calls"] = [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["args"]),
+                        },
+                    }
+                    for tc in m.tool_calls
+                ]
+                msg["content"] = m.content if m.content else None
+            else:
+                msg["content"] = m.content or ""
+            result.append(msg)
+        elif hasattr(m, "tool_call_id"):
+            # ToolMessage
+            content = m.content if isinstance(m.content, str) else json.dumps(m.content)
+            result.append({
+                "role": "tool",
+                "tool_call_id": m.tool_call_id,
+                "content": content,
+            })
+    return result
+
+
+def _langchain_tools_to_openai(tools: list) -> list[dict[str, Any]]:
+    """Convert LangChain @tool objects to OpenAI function-calling tool specs."""
+    openai_tools: list[dict[str, Any]] = []
+    for t in tools:
+        schema = t.args_schema.model_json_schema()
+        schema.pop("title", None)
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description or "",
+                "parameters": schema,
+            },
+        })
+    return openai_tools
+
+
+def _openai_response_to_ai_message(response: Any) -> AIMessage:
+    """Convert an OpenAI ChatCompletion response to a LangChain AIMessage."""
+    choice = response.choices[0]
+    msg = choice.message
+
+    tool_calls: list[dict[str, Any]] = []
+    if msg.tool_calls:
+        for tc in msg.tool_calls:
+            tool_calls.append({
+                "id": tc.id,
+                "name": tc.function.name,
+                "args": json.loads(tc.function.arguments),
+            })
+
+    return AIMessage(
+        content=msg.content or "",
+        tool_calls=tool_calls,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -59,16 +163,21 @@ def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatAnthropic:
 def skill_parser(state: AgentState) -> dict[str, Any]:
     """Parse raw user input into a structured SkillPlan.
 
-    Uses LLM with structured output to decompose instructions into steps.
+    Uses OpenAI chat.completions with JSON mode.
     """
-    llm = _get_llm().with_structured_output(SkillPlan)
+    client = _get_client()
 
-    result: SkillPlan = llm.invoke(
-        [
-            SystemMessage(content=SKILL_PARSER_SYSTEM),
-            HumanMessage(content=state["raw_input"]),
-        ]
+    response = client.chat.completions.create(
+        model=_get_model(),
+        messages=[
+            {"role": "system", "content": SKILL_PARSER_SYSTEM},
+            {"role": "user", "content": state["raw_input"]},
+        ],
+        response_format={"type": "json_object"},
     )
+
+    raw = response.choices[0].message.content
+    result = SkillPlan.model_validate_json(raw)
 
     logger.info("Parsed plan with %d steps: %s", len(result.steps), result.goal)
 
@@ -125,21 +234,30 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
 
 
 def optimizer_agent(state: AgentState) -> dict[str, Any]:
-    """Invoke the Optimizer LLM to execute the current step.
+    """Invoke the Optimizer LLM via OpenAI chat.completions.
 
     The Optimizer has access to all tools (safe_cli_executor, safe_py_runner).
     It will either make tool calls or return a text summary when done.
     """
-    llm = _get_llm().bind_tools(ALL_TOOLS)
-    response: AIMessage = llm.invoke(state["messages"])
+    client = _get_client()
+    openai_messages = _langchain_to_openai_messages(state["messages"])
+    openai_tools = _langchain_tools_to_openai(ALL_TOOLS)
+
+    response = client.chat.completions.create(
+        model=_get_model(),
+        messages=openai_messages,
+        tools=openai_tools,
+    )
+
+    ai_message = _openai_response_to_ai_message(response)
 
     logger.info(
         "Optimizer response: tool_calls=%d, text_len=%d",
-        len(response.tool_calls) if response.tool_calls else 0,
-        len(response.content) if isinstance(response.content, str) else 0,
+        len(ai_message.tool_calls) if ai_message.tool_calls else 0,
+        len(ai_message.content) if isinstance(ai_message.content, str) else 0,
     )
 
-    return {"messages": [response]}
+    return {"messages": [ai_message]}
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +270,20 @@ tool_executor = ToolNode(ALL_TOOLS)
 
 
 # ---------------------------------------------------------------------------
-# Node 3: Evaluator Agent
+# Node 3: Evaluator Agent (with internal tool execution loop)
 # ---------------------------------------------------------------------------
+
+_EVALUATOR_MAX_TOOL_ROUNDS = 5
 
 
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
 
-    Returns structured EvaluationOutput (PASS/FAIL + feedback).
+    The evaluator can use tools (CLI inspection, Python script execution,
+    inline eval scripts) in an internal loop before returning the final
+    structured verdict.
     """
+    client = _get_client()
     step: StepSchema = state["steps"][state["current_step_index"]]
 
     system_prompt = EVALUATOR_SYSTEM.format(
@@ -169,14 +292,71 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         skill_memory=format_skill_memory(state["skill_memory"]),
     )
 
-    llm = _get_llm().bind_tools(READONLY_TOOLS).with_structured_output(
-        EvaluationOutput
-    )
+    eval_messages = [SystemMessage(content=system_prompt)] + state["messages"]
+    openai_messages = _langchain_to_openai_messages(eval_messages)
+    openai_tools = _langchain_tools_to_openai(EVALUATOR_TOOLS)
 
-    evaluation: EvaluationOutput = llm.invoke(
-        [SystemMessage(content=system_prompt)]
-        + state["messages"],
-    )
+    # Build tool name -> function lookup for local execution
+    tool_map = {t.name: t for t in EVALUATOR_TOOLS}
+
+    # Internal tool-use loop: evaluator can call tools before giving verdict
+    choice = None
+    for _round in range(_EVALUATOR_MAX_TOOL_ROUNDS):
+        kwargs: dict[str, Any] = {
+            "model": _get_model(),
+            "messages": openai_messages,
+        }
+        if openai_tools:
+            kwargs["tools"] = openai_tools
+
+        response = client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+
+        if not choice.message.tool_calls:
+            # No tool calls — this is the final evaluation response
+            break
+
+        # Append assistant message with tool calls
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": choice.message.content,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in choice.message.tool_calls
+            ],
+        }
+        openai_messages.append(assistant_msg)
+
+        # Execute each tool call and append results
+        for tc in choice.message.tool_calls:
+            args = json.loads(tc.function.arguments)
+            tool_fn = tool_map.get(tc.function.name)
+            if tool_fn:
+                try:
+                    result = tool_fn.invoke(args)
+                except Exception as exc:
+                    result = f"[ERROR] {exc}"
+            else:
+                result = f"[ERROR] Unknown tool: {tc.function.name}"
+
+            openai_messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result if isinstance(result, str) else json.dumps(result),
+            })
+
+        logger.info("Evaluator tool round %d completed", _round + 1)
+
+    # Parse the final evaluation from the last response
+    raw_content = choice.message.content
+    evaluation = EvaluationOutput.model_validate_json(raw_content)
 
     logger.info(
         "Evaluator verdict: %s — %s",
@@ -232,21 +412,14 @@ def commit_step(state: AgentState) -> dict[str, Any]:
 
 
 def route_step(state: AgentState) -> str:
-    """Router: decide whether to continue to next step or finish.
-
-    Returns the name of the next node.
-    """
+    """Router: decide whether to continue to next step or finish."""
     if state["current_step_index"] >= len(state["steps"]):
         return "end"
     return "prepare_step_context"
 
 
 def route_optimizer_output(state: AgentState) -> str:
-    """After Optimizer: route to tool execution or evaluator.
-
-    If the last message has tool_calls -> run tools.
-    Otherwise (plain text) -> evaluate.
-    """
+    """After Optimizer: route to tool execution or evaluator."""
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         return "tool_executor"

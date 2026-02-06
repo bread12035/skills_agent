@@ -11,7 +11,7 @@ Rules:
 4. Keep steps atomic — one logical action per step.
 5. If the task is simple, a single step is fine.
 
-Output ONLY the structured JSON matching the SkillPlan schema.
+Output ONLY a JSON object matching the SkillPlan schema (with fields: goal, steps).
 """
 
 OPTIMIZER_SYSTEM = """\
@@ -51,8 +51,13 @@ Success Criteria: {criteria}
 
 Rules:
 1. Examine the Optimizer's output and any tool results in the conversation.
-2. You may use read-only tools (safe_cli_executor) to inspect the filesystem if needed.
-3. Respond with a structured JSON matching the EvaluationOutput schema:
+2. You may use tools to verify results:
+   - safe_cli_executor: inspect the filesystem (read files, search, git status, etc.)
+   - safe_py_runner: run test scripts from the scripts/ directory
+   - eval_script_runner: run inline Python code for validation \
+(regex matching, numeric comparisons, JSON checks, etc.)
+3. When you are done verifying, respond with ONLY a JSON object matching the \
+EvaluationOutput schema:
    - verdict: "PASS" or "FAIL"
    - feedback: concrete explanation of why it passed or what went wrong
    - key_outputs: dictionary of important values to remember (only on PASS)

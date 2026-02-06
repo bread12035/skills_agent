@@ -236,11 +236,75 @@ def safe_py_runner(
 
 
 # ---------------------------------------------------------------------------
+# Evaluator-only tool: inline Python script runner for testing/validation
+# ---------------------------------------------------------------------------
+
+
+class EvalScriptInput(BaseModel):
+    """Input schema for eval_script_runner."""
+
+    code: str = Field(
+        description=(
+            "Python code to execute for evaluation. "
+            "Use for regex checks, numeric comparisons, JSON validation, etc. "
+            "Print results to stdout."
+        )
+    )
+
+
+# Patterns blocked inside eval scripts
+_EVAL_BLOCKED_PATTERNS = [
+    "import os", "import sys", "import subprocess", "import shutil",
+    "import socket", "import http", "import urllib", "import requests",
+    "import pathlib", "from os ", "from sys ", "from subprocess",
+    "from shutil", "from socket", "from http", "from urllib",
+    "from pathlib", "__import__", "exec(", "eval(",
+    "open(", "compile(", "globals(", "locals(",
+    "breakpoint(", "os.system", "os.popen",
+]
+
+
+@tool("eval_script_runner", args_schema=EvalScriptInput)
+def eval_script_runner(code: str) -> str:
+    """Run a short inline Python snippet for evaluation and testing.
+
+    Use this tool to verify outputs with:
+    - regex matching (import re is allowed)
+    - numeric comparisons
+    - JSON parsing and validation (import json is allowed)
+    - string manipulation checks
+    - math operations (import math is allowed)
+
+    Filesystem access, network calls, and dangerous builtins are blocked.
+    Print your results to stdout.
+    """
+    for pattern in _EVAL_BLOCKED_PATTERNS:
+        if pattern in code:
+            return f"[SECURITY BLOCKED] Forbidden pattern in eval code: {pattern!r}"
+
+    try:
+        result = subprocess.run(
+            ["python", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd="/tmp",
+        )
+        output = result.stdout
+        if result.returncode != 0:
+            output += f"\n[STDERR]\n{result.stderr}" if result.stderr else ""
+            output += f"\n[EXIT CODE] {result.returncode}"
+        return output.strip() or "(no output)"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] Eval script timed out after 30s"
+
+
+# ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
 
 ALL_TOOLS = [safe_cli_executor, safe_py_runner]
-READONLY_TOOLS = [safe_cli_executor]  # Evaluator gets read-only access
+EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner, eval_script_runner]
 
 
 def get_tool_descriptions() -> str:

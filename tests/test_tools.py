@@ -8,6 +8,7 @@ from skills_agent.tools import (
     _validate_and_build,
     safe_cli_executor,
     safe_py_runner,
+    eval_script_runner,
     get_tool_descriptions,
 )
 
@@ -104,6 +105,44 @@ class TestSafePyRunner:
             {"script_name": "test.py", "args": [], "env_vars": {"bad key": "val"}}
         )
         assert "[SECURITY BLOCKED]" in result
+
+
+class TestEvalScriptRunner:
+    def test_simple_math(self):
+        result = eval_script_runner.invoke({"code": "print(1 + 2)"})
+        assert "3" in result
+
+    def test_regex_check(self):
+        code = 'import re\nprint(bool(re.match(r"^hello", "hello world")))'
+        result = eval_script_runner.invoke({"code": code})
+        assert "True" in result
+
+    def test_json_check(self):
+        code = 'import json\ndata = json.loads(\'{"key": "value"}\')\nprint(data["key"])'
+        result = eval_script_runner.invoke({"code": code})
+        assert "value" in result
+
+    def test_blocked_os_import(self):
+        result = eval_script_runner.invoke({"code": "import os\nprint(os.getcwd())"})
+        assert "[SECURITY BLOCKED]" in result
+
+    def test_blocked_subprocess(self):
+        result = eval_script_runner.invoke(
+            {"code": "import subprocess\nsubprocess.run(['ls'])"}
+        )
+        assert "[SECURITY BLOCKED]" in result
+
+    def test_blocked_open(self):
+        result = eval_script_runner.invoke(
+            {"code": "f = open('/etc/passwd')\nprint(f.read())"}
+        )
+        assert "[SECURITY BLOCKED]" in result
+
+    def test_timeout_protection(self):
+        result = eval_script_runner.invoke(
+            {"code": "import time\ntime.sleep(60)"}
+        )
+        assert "[ERROR]" in result or "timed out" in result.lower()
 
 
 class TestToolDescriptions:

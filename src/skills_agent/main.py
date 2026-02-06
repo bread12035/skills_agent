@@ -1,4 +1,4 @@
-"""CLI entry point for the Claude Skills Agentic Executor.
+"""CLI entry point for the Skills Agentic Executor.
 
 Usage:
     skills-agent "Deploy the microservice and test it"
@@ -8,13 +8,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
+import os
 import sys
 import uuid
 
+from dotenv import load_dotenv
+
 from skills_agent.graph import build_graph
 from skills_agent.models import AgentState, EvaluationOutput
+
+# Load .env file if present (before any other imports that need env vars)
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -179,7 +184,7 @@ def resume(thread_id: str) -> dict:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Claude Skills Agentic Executor",
+        description="Skills Agentic Executor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
