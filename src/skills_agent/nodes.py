@@ -14,7 +14,7 @@ import json
 import logging
 from typing import Any
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.prebuilt import ToolNode
 
@@ -44,11 +44,11 @@ logger = logging.getLogger(__name__)
 # LLM instances
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+_DEFAULT_MODEL = "gpt-oss"
 
 
-def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatAnthropic:
-    return ChatAnthropic(model=model, **kwargs)
+def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
+    return ChatOpenAI(model=model, **kwargs)
 
 
 # ---------------------------------------------------------------------------

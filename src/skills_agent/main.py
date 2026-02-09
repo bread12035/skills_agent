@@ -1,4 +1,4 @@
-"""CLI entry point for the Claude Skills Agentic Executor.
+"""CLI entry point for the Skills Agentic Executor.
 
 Usage:
     skills-agent "Deploy the microservice and test it"
@@ -179,7 +179,7 @@ def resume(thread_id: str) -> dict:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Claude Skills Agentic Executor",
+        description="Skills Agentic Executor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
