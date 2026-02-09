@@ -3,6 +3,9 @@
 import pytest
 
 from skills_agent.tools import (
+    ALL_TOOLS,
+    EVALUATOR_TOOLS,
+    READONLY_TOOLS,
     ToolSecurityError,
     _check_blocked_patterns,
     _validate_and_build,
@@ -104,6 +107,25 @@ class TestSafePyRunner:
             {"script_name": "test.py", "args": [], "env_vars": {"bad key": "val"}}
         )
         assert "[SECURITY BLOCKED]" in result
+
+
+class TestToolRegistries:
+    def test_all_tools_has_both(self):
+        assert safe_cli_executor in ALL_TOOLS
+        assert safe_py_runner in ALL_TOOLS
+
+    def test_readonly_tools_has_only_cli(self):
+        assert safe_cli_executor in READONLY_TOOLS
+        assert safe_py_runner not in READONLY_TOOLS
+
+    def test_evaluator_tools_has_both(self):
+        assert safe_cli_executor in EVALUATOR_TOOLS
+        assert safe_py_runner in EVALUATOR_TOOLS
+
+    def test_evaluator_tools_includes_py_runner(self):
+        tool_names = [t.name for t in EVALUATOR_TOOLS]
+        assert "safe_cli_executor" in tool_names
+        assert "safe_py_runner" in tool_names
 
 
 class TestToolDescriptions:

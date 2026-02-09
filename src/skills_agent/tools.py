@@ -240,7 +240,8 @@ def safe_py_runner(
 # ---------------------------------------------------------------------------
 
 ALL_TOOLS = [safe_cli_executor, safe_py_runner]
-READONLY_TOOLS = [safe_cli_executor]  # Evaluator gets read-only access
+READONLY_TOOLS = [safe_cli_executor]  # Read-only inspection
+EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner]  # Evaluator: read + py verification
 
 
 def get_tool_descriptions() -> str:
