@@ -13,7 +13,7 @@ class TestGlobalContext:
         ctx = load_global_context()
         # claude.md exists in the repo
         assert len(ctx) > 0
-        assert "Claude" in ctx
+        assert "Skills Agent" in ctx
 
 
 class TestSkillMemory:
