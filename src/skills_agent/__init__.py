@@ -1,1 +1,1 @@
-"""Claude Skills Agentic Executor - Evaluator-Optimizer Loop managed by LangGraph."""
+"""Skills Agentic Executor - Evaluator-Optimizer Loop managed by LangGraph."""
