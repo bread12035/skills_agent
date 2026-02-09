@@ -37,7 +37,7 @@ from skills_agent.prompts import (
     OPTIMIZER_SYSTEM,
     SKILL_PARSER_SYSTEM,
 )
-from skills_agent.tools import ALL_TOOLS, READONLY_TOOLS, get_tool_descriptions
+from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, READONLY_TOOLS, get_tool_descriptions
 
 logger = logging.getLogger(__name__)
 
@@ -160,10 +160,18 @@ tool_executor = ToolNode(ALL_TOOLS)
 # ---------------------------------------------------------------------------
 
 
+_EVALUATOR_MAX_TOOL_ROUNDS = 5
+
+# ToolNode for evaluator-internal tool execution (not a graph node)
+_evaluator_tool_node = ToolNode(EVALUATOR_TOOLS)
+
+
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
 
-    Returns structured EvaluationOutput (PASS/FAIL + feedback).
+    The evaluator can run safe Python verification scripts (via safe_py_runner)
+    and read-only CLI commands in an internal tool loop before producing its
+    final PASS/FAIL verdict as structured EvaluationOutput.
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
@@ -173,14 +181,28 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         skill_memory=format_skill_memory(state["skill_memory"]),
     )
 
-    llm = _get_llm().bind_tools(READONLY_TOOLS).with_structured_output(
-        EvaluationOutput
-    )
+    # Phase 1: Tool-calling loop — let the evaluator invoke verification tools
+    tool_llm = _get_llm().bind_tools(EVALUATOR_TOOLS)
+    messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
 
-    evaluation: EvaluationOutput = llm.invoke(
-        [SystemMessage(content=system_prompt)]
-        + state["messages"],
-    )
+    for round_num in range(_EVALUATOR_MAX_TOOL_ROUNDS):
+        response: AIMessage = tool_llm.invoke(messages)
+        messages.append(response)
+
+        if not (hasattr(response, "tool_calls") and response.tool_calls):
+            break  # No tool calls — evaluator is ready to give verdict
+
+        logger.info(
+            "Evaluator tool round %d: %d call(s)",
+            round_num + 1,
+            len(response.tool_calls),
+        )
+        tool_result = _evaluator_tool_node.invoke({"messages": messages})
+        messages.extend(tool_result["messages"])
+
+    # Phase 2: Structured verdict — ask the LLM for its final evaluation
+    verdict_llm = _get_llm().with_structured_output(EvaluationOutput)
+    evaluation: EvaluationOutput = verdict_llm.invoke(messages)
 
     logger.info(
         "Evaluator verdict: %s — %s",
