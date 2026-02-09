@@ -1,10 +1,9 @@
-"""Four-layer memory management for the Skills Agent.
+"""Three-layer memory management for the Skills Agent.
 
 Layers:
     L1 — Global Context:  loaded from claude.md (read-only, permanent)
     L2 — Skill Memory:    cross-step KV store (append-only during task)
     L3 — Loop Context:    optimizer↔evaluator messages (cleared per step)
-    L4 — Checkpoints:     handled by LangGraph SqliteSaver (external)
 """
 
 from __future__ import annotations
