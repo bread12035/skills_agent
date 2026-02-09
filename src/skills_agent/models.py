@@ -78,7 +78,6 @@ class AgentState(TypedDict):
         L1 - Global Context:  loaded from claude.md (injected into prompts, not stored here)
         L2 - Skill Memory:    `skill_memory` — cross-step variable passing, append-only
         L3 - Loop Context:    `messages` — Optimizer↔Evaluator dialogue, cleared per step
-        L4 - Checkpoints:     persisted automatically by LangGraph SqliteSaver
     """
 
     # --- Workflow Control ---
