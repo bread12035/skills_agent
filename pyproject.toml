@@ -9,7 +9,6 @@ description = "Skills Agentic Executor - Evaluator-Optimizer Loop managed by Lan
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2.0",
-    "langgraph-checkpoint-sqlite>=3.0.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.3.0",
     "pydantic>=2.0",

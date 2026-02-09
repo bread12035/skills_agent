@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -48,6 +49,9 @@ _DEFAULT_MODEL = "gpt-oss"
 
 
 def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
+    base_url = os.environ.get("OPENAI_API_BASE")
+    if base_url:
+        kwargs.setdefault("openai_api_base", base_url)
     return ChatOpenAI(model=model, **kwargs)
 
 
