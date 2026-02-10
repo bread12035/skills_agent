@@ -1,27 +1,28 @@
 # Tool Security Gateway — Parametric Whitelist Configuration
 # Each entry defines a whitelisted command template with regex-validated parameters.
+# Commands use Windows CLI (cmd.exe / PowerShell) syntax.
 
 cli_whitelist:
   list_files:
     description: "List files and directories"
-    template: "ls -la {path}"
+    template: "dir /A /O:N {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   read_file:
     description: "Read file contents"
-    template: "cat {path}"
+    template: "type {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   search_text:
     description: "Search for text patterns in files"
-    template: "grep -rn {pattern} {path}"
+    template: "findstr /S /N /R {pattern} {path}"
     params:
       pattern: "^[a-zA-Z0-9_.* -]+$"
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 30
 
   git_status:
@@ -34,14 +35,14 @@ cli_whitelist:
     description: "Show git diff"
     template: "git diff {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]*$"
+      path: "^[a-zA-Z0-9_.\\\\/-]*$"
     timeout: 10
 
   git_add:
     description: "Stage files for commit"
     template: "git add {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   git_commit:
@@ -53,39 +54,39 @@ cli_whitelist:
 
   make_directory:
     description: "Create a directory"
-    template: "mkdir -p {path}"
+    template: "mkdir {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   tree:
     description: "Show directory tree"
-    template: "tree {path}"
+    template: "tree /F {path}"
     params:
-      path: "^[a-zA-Z0-9_./-]*$"
+      path: "^[a-zA-Z0-9_.\\\\/-]*$"
     timeout: 10
 
   head_file:
     description: "Show first N lines of a file"
-    template: "head -n {lines} {path}"
+    template: "powershell -Command \"Get-Content {path} -TotalCount {lines}\""
     params:
       lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   tail_file:
     description: "Show last N lines of a file"
-    template: "tail -n {lines} {path}"
+    template: "powershell -Command \"Get-Content {path} -Tail {lines}\""
     params:
       lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   word_count:
     description: "Count lines, words, characters in a file"
-    template: "wc {path}"
+    template: "powershell -Command \"Get-Content {path} | Measure-Object -Line -Word -Character\""
     params:
-      path: "^[a-zA-Z0-9_./-]+$"
+      path: "^[a-zA-Z0-9_.\\\\/-]+$"
     timeout: 10
 
   pip_install:
@@ -99,17 +100,19 @@ cli_whitelist:
     description: "Run a Python script from the scripts/ directory"
     template: "python {script}"
     params:
-      script: "^scripts/[a-zA-Z0-9_/-]+\\.py$"
+      script: "^scripts[/\\\\][a-zA-Z0-9_/\\\\-]+\\.py$"
     timeout: 120
 
 # Blocked patterns — commands that must NEVER be executed
 blocked_patterns:
   - "rm\\s+-rf"
   - "rm\\s+-r"
-  - "rmdir"
+  - "rmdir\\s+/s"
+  - "del\\s+/f"
+  - "del\\s+/s"
+  - "format\\s+[a-zA-Z]:"
   - "mkfs"
   - "dd\\s+if="
-  - ":(){:|:&};:"
   - "chmod\\s+777"
   - "curl.*\\|.*sh"
   - "wget.*\\|.*sh"
@@ -117,3 +120,4 @@ blocked_patterns:
   - "__import__"
   - "os\\.system"
   - "subprocess"
+  - "Remove-Item.*-Recurse"
