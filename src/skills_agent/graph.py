@@ -4,7 +4,9 @@ Constructs the Two-Layer Loop Architecture:
     Outer Loop: Step Router → Prepare → Inner Loop → Commit → Router
     Inner Loop: Optimizer → Tools → Evaluator → (PASS→Commit | FAIL→Optimizer)
 
-Runs in stateless mode — no checkpoint persistence between steps.
+The skill_parser runs separately before the execution graph so that
+human approval can be requested immediately after parsing — before any
+steps are executed.
 """
 
 from __future__ import annotations
@@ -50,16 +52,33 @@ def human_intervention(state: AgentState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def build_graph() -> StateGraph:
-    """Build and compile the Skills Agent LangGraph (stateless).
+def build_parser_graph() -> StateGraph:
+    """Build a minimal graph that only runs the skill_parser node.
 
     Returns:
-        Compiled LangGraph ready for invocation.
+        Compiled LangGraph that parses input into a SkillPlan.
+    """
+    graph = StateGraph(AgentState)
+    graph.add_node("skill_parser", skill_parser)
+    graph.set_entry_point("skill_parser")
+    graph.add_edge("skill_parser", END)
+    compiled = graph.compile()
+    logger.info("Parser graph compiled")
+    return compiled
+
+
+def build_execution_graph() -> StateGraph:
+    """Build the execution graph (post-approval).
+
+    Entry point is prepare_step_context — expects state already populated
+    with parsed steps from the parser graph.
+
+    Returns:
+        Compiled LangGraph ready for step execution.
     """
     graph = StateGraph(AgentState)
 
-    # --- Add nodes ---
-    graph.add_node("skill_parser", skill_parser)
+    # --- Add nodes (no skill_parser — already ran) ---
     graph.add_node("prepare_step_context", prepare_step_context)
     graph.add_node("optimizer_agent", optimizer_agent)
     graph.add_node("tool_executor", tool_executor)
@@ -67,20 +86,10 @@ def build_graph() -> StateGraph:
     graph.add_node("commit_step", commit_step)
     graph.add_node("human_intervention", human_intervention)
 
-    # --- Entry point ---
-    graph.set_entry_point("skill_parser")
+    # --- Entry point: start executing steps ---
+    graph.set_entry_point("prepare_step_context")
 
     # --- Edges ---
-
-    # After parsing: route to first step
-    graph.add_conditional_edges(
-        "skill_parser",
-        route_step,
-        {
-            "prepare_step_context": "prepare_step_context",
-            "end": END,
-        },
-    )
 
     # After preparing context: always go to optimizer
     graph.add_edge("prepare_step_context", "optimizer_agent")
@@ -122,8 +131,6 @@ def build_graph() -> StateGraph:
     # After human intervention: retry the step
     graph.add_edge("human_intervention", "prepare_step_context")
 
-    # --- Compile without checkpointer (stateless) ---
     compiled = graph.compile()
-
-    logger.info("Graph compiled (stateless mode)")
+    logger.info("Execution graph compiled")
     return compiled
