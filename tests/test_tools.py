@@ -18,12 +18,12 @@ from skills_agent.tools import (
 class TestValidateAndBuild:
     def test_valid_list_files(self):
         cmd, timeout = _validate_and_build("list_files", {"path": "/tmp"})
-        assert "ls" in cmd
+        assert "dir" in cmd
         assert timeout == 10
 
     def test_valid_read_file(self):
         cmd, timeout = _validate_and_build("read_file", {"path": "test.txt"})
-        assert "cat" in cmd
+        assert "type" in cmd
 
     def test_unknown_tool_rejected(self):
         with pytest.raises(ToolSecurityError, match="not in the whitelist"):
