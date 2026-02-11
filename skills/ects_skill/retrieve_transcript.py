@@ -1,16 +1,19 @@
 """Retrieve an earnings call transcript from the API."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
 import requests
 
 
-# ── Configuration (fill in before use) ──────────────────────────────
-API_URL = "<FILL_IN_API_URL>"
-API_TOKEN = "<FILL_IN_API_TOKEN>"
-# ────────────────────────────────────────────────────────────────────
+# ── Configuration — reads from environment variables ─────────────
+API_URL = os.environ.get("TRANSCRIPT_API_URL", "")
+API_TOKEN = os.environ.get("TRANSCRIPT_API_TOKEN", "")
+# ────────────────────────────────────────────────────────────────
+
+OUTPUT_DIR = Path(__file__).parent / "tmp"
 
 
 def retrieve_transcript(company: str, fiscal_year: str, fiscal_quarter: str) -> dict:
@@ -30,6 +33,13 @@ def retrieve_transcript(company: str, fiscal_year: str, fiscal_quarter: str) -> 
     dict
         Raw API response as a Python dict/list.
     """
+    if not API_URL:
+        print("ERROR: TRANSCRIPT_API_URL environment variable is not set.")
+        sys.exit(1)
+    if not API_TOKEN:
+        print("ERROR: TRANSCRIPT_API_TOKEN environment variable is not set.")
+        sys.exit(1)
+
     headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json",
@@ -57,9 +67,9 @@ def main() -> None:
     print(f"Retrieving transcript for {company} FY{fiscal_year} {fiscal_quarter} ...")
     response = retrieve_transcript(company, fiscal_year, fiscal_quarter)
 
-    # Save raw response for downstream parsing
-    output_path = Path(__file__).parent / "tmp" / "raw_response.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save raw response to standardized tmp/ directory
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = OUTPUT_DIR / "raw_response.json"
     output_path.write_text(json.dumps(response, indent=2), encoding="utf-8")
     print(f"Raw response saved to {output_path}")
 

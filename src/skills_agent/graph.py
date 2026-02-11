@@ -41,9 +41,16 @@ def human_intervention(state: AgentState) -> dict:
     Resets retry count so the loop can try again.
     """
     logger.warning(
-        "Human intervention requested at step %d (retries exhausted)",
+        "[human_intervention] Node Input — step_index: %d | retry_count: %d (retries exhausted)",
         state["current_step_index"],
+        state["step_retry_count"],
     )
+    logger.info(
+        "[human_intervention] Memory State — skill_memory: %r | messages: %d",
+        (state.get("skill_memory", "")[:200] or "(empty)"),
+        len(state.get("messages", [])),
+    )
+    logger.info("[human_intervention] Node Output — reset step_retry_count to 0")
     return {"step_retry_count": 0}
 
 
