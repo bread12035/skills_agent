@@ -51,6 +51,25 @@ def _check_blocked_patterns(command: str) -> None:
             )
 
 
+def _normalise_path_params(params: dict[str, str], param_rules: dict[str, str]) -> dict[str, str]:
+    """Convert forward slashes to backslashes in path-like parameters.
+
+    Any parameter whose validation regex allows backslashes (indicating a path
+    parameter) gets its forward slashes replaced with backslashes automatically.
+    This acts as a safety net when the LLM emits UNIX-style paths despite
+    instructions to use Windows-style paths.
+    """
+    normalised = {}
+    for key, value in params.items():
+        rule = param_rules.get(key, "")
+        # If the regex contains \\\\ (escaped backslash), it's a path parameter
+        if "\\\\" in rule or key in ("path", "src", "dst"):
+            normalised[key] = value.replace("/", "\\")
+        else:
+            normalised[key] = value
+    return normalised
+
+
 def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, int]:
     """Validate parameters against whitelist and build the final command string.
 
@@ -65,6 +84,9 @@ def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, in
     template: str = spec["template"]
     param_rules: dict[str, str] = spec.get("params", {})
     timeout: int = spec.get("timeout", 30)
+
+    # Normalise path parameters: forward slashes → backslashes
+    params = _normalise_path_params(params, param_rules)
 
     # Validate every parameter
     for pname, regex in param_rules.items():
@@ -131,9 +153,15 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     IMPORTANT: This is the ONLY way to run CLI commands. Do NOT call sub-commands
     (read_file, list_files, etc.) as separate tools — they must be passed as tool_name.
 
-    All path values in params MUST use Windows backslashes (\\).
+    All path values in params MUST use Windows-style backslashes (\\).
+    Forward slashes (/) are NOT allowed in path parameters.
 
     Usage: safe_cli_executor(tool_name="<sub_command>", params={"path": "folder\\\\file.txt"})
+
+    Examples:
+      safe_cli_executor(tool_name="read_file", params={"path": "skills\\\\ects_skill\\\\skills.md"})
+      safe_cli_executor(tool_name="list_files", params={"path": "skills\\\\ects_skill\\\\tmp"})
+      safe_cli_executor(tool_name="write_json", params={"path": "ects_skill\\\\tmp\\\\output.json", "content": "..."})
 
     Available sub-commands (pass as tool_name):
     - list_files: params={path}
@@ -149,7 +177,7 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     - write_md: params={path, content}
     - copy_file: params={src, dst}
     - move_file: params={src, dst}
-    - python_run: params={script}
+    - python_run: params={script}  (e.g. script="scripts\\\\format_check.py")
     """
     if params is None:
         params = {}
@@ -182,9 +210,9 @@ def safe_py_runner(
     args: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
 ) -> str:
-    """Execute a Python script from the approved scripts/ directory.
+    """Execute a Python script from the approved scripts\\ directory.
 
-    Only scripts located in the scripts/ directory are allowed.
+    Only scripts located in the scripts\\ directory are allowed.
     Arguments and env vars are validated for safety.
     """
     import os
@@ -267,5 +295,8 @@ def get_tool_descriptions() -> str:
             f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
         )
     lines.append("")
-    lines.append("Remember: All path values must use backslashes (\\\\), e.g. 'skills\\\\ects_skill\\\\tmp'")
+    lines.append("IMPORTANT: All path values MUST use Windows-style backslashes (\\\\).")
+    lines.append("  CORRECT: 'skills\\\\ects_skill\\\\tmp\\\\output.json'")
+    lines.append("  WRONG:   'skills/ects_skill/tmp/output.json'")
+    lines.append("Forward slashes in paths are NOT allowed and will be rejected.")
     return "\n".join(lines)
