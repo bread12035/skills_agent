@@ -126,23 +126,30 @@ class SafeCliInput(BaseModel):
 
 @tool("safe_cli_executor", args_schema=SafeCliInput)
 def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> str:
-    """Execute a whitelisted CLI command through the Security Gateway.
+    """Execute a whitelisted CLI sub-command through the Security Gateway.
 
-    Available tools and their parameters:
-    - list_files(path): List files at a path
-    - read_file(path): Read file contents
-    - search_text(pattern, path): Grep for patterns
-    - make_directory(path): Create directory (with parents)
-    - tree(path): Show directory tree
-    - head_file(lines, path): First N lines
-    - tail_file(lines, path): Last N lines
-    - word_count(path): Count lines/words/chars
-    - write_json(path, content): Write content to a .json file
-    - write_txt(path, content): Write content to a .txt file
-    - write_md(path, content): Write content to a .md file
-    - copy_file(src, dst): Copy a file
-    - move_file(src, dst): Move or rename a file
-    - python_run(script): Run script from scripts/ dir
+    IMPORTANT: This is the ONLY way to run CLI commands. Do NOT call sub-commands
+    (read_file, list_files, etc.) as separate tools — they must be passed as tool_name.
+
+    All path values in params MUST use Windows backslashes (\\).
+
+    Usage: safe_cli_executor(tool_name="<sub_command>", params={"path": "folder\\\\file.txt"})
+
+    Available sub-commands (pass as tool_name):
+    - list_files: params={path}
+    - read_file: params={path}
+    - search_text: params={pattern, path}
+    - make_directory: params={path}
+    - tree: params={path}
+    - head_file: params={lines, path}
+    - tail_file: params={lines, path}
+    - word_count: params={path}
+    - write_json: params={path, content}
+    - write_txt: params={path, content}
+    - write_md: params={path, content}
+    - copy_file: params={src, dst}
+    - move_file: params={src, dst}
+    - python_run: params={script}
     """
     if params is None:
         params = {}
@@ -250,13 +257,15 @@ EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner]  # Evaluator: read + py ve
 def get_tool_descriptions() -> str:
     """Return human-readable tool documentation for prompt injection."""
     lines: list[str] = []
+    lines.append("Sub-commands for safe_cli_executor (call via tool_name + params):")
     whitelist = _CONFIG.get("cli_whitelist", {})
     for name, spec in whitelist.items():
         desc = spec.get("description", "")
-        template = spec.get("template", "")
         params = spec.get("params", {})
         param_str = ", ".join(f"{k}" for k in params)
-        lines.append(f"- {name}({param_str}): {desc}  [template: {template}]")
+        lines.append(
+            f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
+        )
     lines.append("")
-    lines.append("- safe_py_runner(script_name, args, env_vars): Run a Python script from scripts/")
+    lines.append("Remember: All path values must use backslashes (\\\\), e.g. 'skills\\\\ects_skill\\\\tmp'")
     return "\n".join(lines)
