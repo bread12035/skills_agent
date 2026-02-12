@@ -41,16 +41,16 @@ def retrieve_transcript(company: str, fiscal_year: str, fiscal_quarter: str) -> 
         sys.exit(1)
 
     headers = {
-        "Authorization": f"Bearer {API_TOKEN}",
-        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "apikey": API_TOKEN,
     }
     params = {
-        "company": company,
-        "fiscal_year": fiscal_year,
-        "fiscal_quarter": fiscal_quarter,
+        "TRANSCRIPT_CO_CD": company,
+        "FISCAL_YEAR_NO_TRANSCRIPT": fiscal_year,
+        "FISCAL_QTR_NO_TRANSCRIPT": fiscal_quarter,
     }
 
-    resp = requests.get(API_URL, headers=headers, params=params, timeout=60)
+    resp = requests.post(API_URL, headers=headers, params=params, timeout=60, verify=False)
     resp.raise_for_status()
     return resp.json()
 
