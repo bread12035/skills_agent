@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 from dotenv import load_dotenv
 
@@ -98,6 +99,32 @@ def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
 
 
 # ---------------------------------------------------------------------------
+# Path normalisation helper
+# ---------------------------------------------------------------------------
+
+# Matches UNIX-style relative paths such as "ects_skill/tmp/output.json" or
+# "hello_skill/output.txt" but avoids protocol prefixes like "https://".
+_UNIX_PATH_RE = re.compile(
+    r'(?<![a-zA-Z]:)'        # not preceded by a drive-letter colon (e.g. C:)
+    r'(?<!/)'                 # not preceded by another slash (avoids "//", "://")
+    r'(?:[a-zA-Z0-9_.][a-zA-Z0-9_.\-]*)'   # first path segment
+    r'(?:/[a-zA-Z0-9_.][a-zA-Z0-9_.\-]*)+' # one or more "/segment" continuations
+)
+
+
+def _to_windows_paths(text: str) -> str:
+    """Replace UNIX-style forward-slash paths with Windows-style backslash paths.
+
+    Only converts path-like tokens (e.g. ``ects_skill/tmp/output.json``) and
+    leaves URLs, prose, and other content untouched.
+    """
+    def _replace(m: re.Match) -> str:
+        return m.group(0).replace("/", "\\")
+
+    return _UNIX_PATH_RE.sub(_replace, text)
+
+
+# ---------------------------------------------------------------------------
 # Node 0: Skill Parser
 # ---------------------------------------------------------------------------
 
@@ -106,6 +133,9 @@ def skill_parser(state: AgentState) -> dict[str, Any]:
     """Parse raw user input into a structured SkillPlan.
 
     Uses LLM with structured output to decompose instructions into steps.
+    After parsing, all UNIX-style paths in step instructions and criteria are
+    converted to Windows-style backslash paths so downstream agents produce
+    correct path parameters.
     """
     logger.info("[skill_parser] Node Input — raw_input length: %d", len(state.get("raw_input", "")))
     _log_memory_state("skill_parser", state)
@@ -118,6 +148,11 @@ def skill_parser(state: AgentState) -> dict[str, Any]:
             HumanMessage(content=state["raw_input"]),
         ]
     )
+
+    # Post-process: convert any remaining UNIX-style paths to Windows backslashes
+    for step in result.steps:
+        step.instruction = _to_windows_paths(step.instruction)
+        step.criteria = _to_windows_paths(step.criteria)
 
     logger.info(
         "[skill_parser] Parsed plan — goal: %s | steps: %d",

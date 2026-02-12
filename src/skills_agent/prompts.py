@@ -22,6 +22,11 @@ Rules:
 7. Simplify multi-condition criteria into clear, independently verifiable checks.
 8. Each step's criteria should be concrete and measurable (file exists, exit code 0, \
    JSON contains key X, etc.) — never vague ("looks correct", "seems right").
+9. **Path Format — Windows Style REQUIRED**: All file paths in `instruction` and `criteria` \
+   fields MUST use Windows-style backslashes (\\). \
+   CORRECT: "ects_skill\\tmp\\output.json"  WRONG: "ects_skill/tmp/output.json". \
+   CORRECT: "hello_skill\\output.txt"       WRONG: "hello_skill/output.txt". \
+   CORRECT: "scripts\\format_check.py"      WRONG: "scripts/format_check.py".
 
 Output ONLY the structured JSON matching the SkillPlan schema.
 """
@@ -41,7 +46,7 @@ Instruction: {instruction}
 ## Available Tools — IMPORTANT: Read Carefully
 You have EXACTLY two callable tools:
 1. **safe_cli_executor** — Execute whitelisted CLI sub-commands.
-2. **safe_py_runner** — Execute Python scripts from the scripts/ directory.
+2. **safe_py_runner** — Execute Python scripts from the scripts\\ directory.
 
 ### How to use safe_cli_executor
 You MUST call `safe_cli_executor` with a `tool_name` and `params` dict. \
@@ -52,6 +57,10 @@ Example — to read a file:
   CORRECT: safe_cli_executor(tool_name="read_file", params={{"path": "skills\\\\ects_skill\\\\skills.md"}})
   WRONG:   read_file(path="skills/ects_skill/skills.md")    ← This will ERROR
 
+Example — to list files:
+  CORRECT: safe_cli_executor(tool_name="list_files", params={{"path": "skills\\\\ects_skill\\\\tmp"}})
+  WRONG:   list_files(path="skills/ects_skill/tmp")          ← This will ERROR
+
 ### Sub-commands available via safe_cli_executor:
 {tool_docs}
 
@@ -59,7 +68,10 @@ Example — to read a file:
 All `path` parameters MUST use Windows-style backslashes (\\).
   CORRECT: "skills\\\\ects_skill\\\\tmp\\\\output.json"
   WRONG:   "skills/ects_skill/tmp/output.json"
-Do NOT wrap path values in extra quotes. Just pass the plain path string.
+  CORRECT: "scripts\\\\format_check.py"
+  WRONG:   "scripts/format_check.py"
+Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
+Just pass the plain path string with backslashes.
 
 Rules:
 1. Use the provided tools to accomplish the step instruction.
@@ -91,7 +103,7 @@ Success Criteria: {criteria}
 ## Available Verification Tools — IMPORTANT: Read Carefully
 You have EXACTLY two callable tools:
 1. **safe_cli_executor** — Run read-only CLI sub-commands to inspect filesystem state.
-2. **safe_py_runner** — Execute Python verification scripts from the scripts/ directory.
+2. **safe_py_runner** — Execute Python verification scripts from the scripts\\ directory.
 
 ### How to use safe_cli_executor
 You MUST call `safe_cli_executor` with a `tool_name` and `params` dict. \
@@ -110,7 +122,10 @@ Example — to list files:
 All `path` parameters MUST use Windows-style backslashes (\\).
   CORRECT: "skills\\\\ects_skill\\\\tmp\\\\output.json"
   WRONG:   "skills/ects_skill/tmp/output.json"
-Do NOT wrap path values in extra quotes. Just pass the plain path string.
+  CORRECT: "scripts\\\\format_check.py"
+  WRONG:   "scripts/format_check.py"
+Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
+Just pass the plain path string with backslashes.
 
 Rules:
 1. Examine the Optimizer's output and any tool results in the conversation.

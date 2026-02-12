@@ -13,7 +13,7 @@ def parse_response(raw_path: str | Path | None = None) -> dict:
     Parameters
     ----------
     raw_path : str | Path | None
-        Path to raw_response.json. Defaults to ``ects_skill/tmp/raw_response.json``.
+        Path to raw_response.json. Defaults to ``ects_skill\\tmp\\raw_response.json``.
 
     Returns
     -------
