@@ -132,16 +132,16 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     - list_files(path): List files at a path
     - read_file(path): Read file contents
     - search_text(pattern, path): Grep for patterns
-    - git_status(): Show git status
-    - git_diff(path): Show git diff
-    - git_add(path): Stage files
-    - git_commit(message): Create commit
-    - make_directory(path): Create directory
+    - make_directory(path): Create directory (with parents)
     - tree(path): Show directory tree
     - head_file(lines, path): First N lines
     - tail_file(lines, path): Last N lines
     - word_count(path): Count lines/words/chars
-    - pip_install(package): Install Python package
+    - write_json(path, content): Write content to a .json file
+    - write_txt(path, content): Write content to a .txt file
+    - write_md(path, content): Write content to a .md file
+    - copy_file(src, dst): Copy a file
+    - move_file(src, dst): Move or rename a file
     - python_run(script): Run script from scripts/ dir
     """
     if params is None:
@@ -215,8 +215,11 @@ def safe_py_runner(
     if not script_path.exists():
         return f"[ERROR] Script not found: {script_name}"
 
-    # Execute
+    # Execute — inherit TRANSCRIPT_API_* env vars for ects_skill scripts
     env = {**os.environ, **env_vars}
+    for key in ("TRANSCRIPT_API_URL", "TRANSCRIPT_API_TOKEN"):
+        if key in os.environ and key not in env_vars:
+            env[key] = os.environ[key]
     cmd = ["python", str(script_path)] + [shlex.quote(a) for a in args]
     try:
         result = subprocess.run(
