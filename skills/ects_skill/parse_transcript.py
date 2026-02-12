@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-SKILL_DIR = Path(__file__).parent
+SKILL_DIR = Path(__file__).parent.parent / "skills" / "ects_skill"
 
 
 def parse_response(raw_path: str | Path | None = None) -> dict:
