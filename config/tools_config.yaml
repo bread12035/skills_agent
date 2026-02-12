@@ -7,14 +7,14 @@ cli_whitelist:
     description: "List files and directories"
     template: "dir /A /O:N {path}"
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   read_file:
     description: "Read file contents"
     template: "type {path}"
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   search_text:
@@ -22,21 +22,21 @@ cli_whitelist:
     template: "findstr /S /N /R {pattern} {path}"
     params:
       pattern: "^[a-zA-Z0-9_.* -]+$"
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 30
 
   make_directory:
     description: "Create a directory (including parents)"
     template: "mkdir {path}"
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   tree:
     description: "Show directory tree"
     template: "tree /F {path}"
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]*$"
+      path: "^[a-zA-Z0-9_.\\\\-]*$"
     timeout: 10
 
   head_file:
@@ -44,7 +44,7 @@ cli_whitelist:
     template: "powershell -Command \"Get-Content {path} -TotalCount {lines}\""
     params:
       lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   tail_file:
@@ -52,21 +52,21 @@ cli_whitelist:
     template: "powershell -Command \"Get-Content {path} -Tail {lines}\""
     params:
       lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   word_count:
     description: "Count lines, words, characters in a file"
     template: "powershell -Command \"Get-Content {path} | Measure-Object -Line -Word -Character\""
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+$"
+      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   write_json:
     description: "Write content to a .json file"
     template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+\\.json$"
+      path: "^[a-zA-Z0-9_.\\\\-]+\\.json$"
       content: "^[\\s\\S]+$"
     timeout: 15
 
@@ -74,7 +74,7 @@ cli_whitelist:
     description: "Write content to a .txt file"
     template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+\\.txt$"
+      path: "^[a-zA-Z0-9_.\\\\-]+\\.txt$"
       content: "^[\\s\\S]+$"
     timeout: 15
 
@@ -82,7 +82,7 @@ cli_whitelist:
     description: "Write content to a .md file"
     template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
     params:
-      path: "^[a-zA-Z0-9_.\\\\/-]+\\.md$"
+      path: "^[a-zA-Z0-9_.\\\\-]+\\.md$"
       content: "^[\\s\\S]+$"
     timeout: 15
 
@@ -90,23 +90,23 @@ cli_whitelist:
     description: "Copy a file from source to destination"
     template: "copy {src} {dst}"
     params:
-      src: "^[a-zA-Z0-9_.\\\\/-]+$"
-      dst: "^[a-zA-Z0-9_.\\\\/-]+$"
+      src: "^[a-zA-Z0-9_.\\\\-]+$"
+      dst: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   move_file:
     description: "Move or rename a file"
     template: "move {src} {dst}"
     params:
-      src: "^[a-zA-Z0-9_.\\\\/-]+$"
-      dst: "^[a-zA-Z0-9_.\\\\/-]+$"
+      src: "^[a-zA-Z0-9_.\\\\-]+$"
+      dst: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   python_run:
-    description: "Run a Python script from the scripts/ directory"
+    description: "Run a Python script from the scripts\\ directory"
     template: "python {script}"
     params:
-      script: "^scripts[/\\\\][a-zA-Z0-9_/\\\\-]+\\.py$"
+      script: "^scripts\\\\[a-zA-Z0-9_\\\\-]+\\.py$"
     timeout: 120
 
 # Blocked patterns — commands that must NEVER be executed

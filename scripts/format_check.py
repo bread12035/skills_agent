@@ -1,7 +1,7 @@
 """Format checker — validates that a filled template follows the expected structure.
 
 Reads a filled summary markdown file and checks it against the template
-defined in skills/ects_skill/reference/template.md using regex patterns.
+defined in skills\\ects_skill\\reference\\template.md using regex patterns.
 
 Usage:
     python format_check.py <filled_summary.md>
@@ -15,7 +15,7 @@ import re
 import sys
 
 # ---------------------------------------------------------------------------
-# Template structure derived from skills/ects_skill/reference/template.md
+# Template structure derived from skills\ects_skill\reference\template.md
 # ---------------------------------------------------------------------------
 
 # Title line: ### AI Summarization (Calendar year: Q<quarter>, <year>)
