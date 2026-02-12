@@ -42,6 +42,14 @@ Instruction: {instruction}
 ## Skill Memory (cross-step context)
 {skill_memory}
 
+The skill memory contains data passed from previous steps. For example:
+- Direct values: company=AAPL, calendar_year=2024
+- File references: transcript_path=skills\\\\ects_skill\\\\tmp\\\\transcript.txt
+- Metadata: transcript_length=45230
+
+You can use these values directly without re-reading files when the data is inline.
+If only a path is provided, read the file from disk.
+
 ## Global Context
 {global_context}
 
@@ -166,6 +174,26 @@ execute with cwd = project root, so every relative path resolves from there.
 Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
 Just pass the plain path string with backslashes.
 
+## Data Passing Responsibility
+
+After verifying the step, you must extract data needed by subsequent steps into key_outputs.
+
+Guidelines:
+1. **Small data (< 1000 chars)**: Include full content inline
+   Example: {{"company": "AAPL", "calendar_year": "2024", "calendar_quarter": "Q1"}}
+
+2. **Medium data (1000-10000 chars)**: Include key excerpts + metadata
+   Example: {{"config_path": "...", "key_setting": "value", "total_lines": "150"}}
+
+3. **Large data (> 10000 chars)**: Include path + critical metadata
+   Example: {{"transcript_path": "...", "transcript_length": "45230", "word_count": "8500"}}
+
+4. **Structured data**: Parse and extract important fields
+   Example: For JSON files, extract top-level keys and sample values
+
+Do NOT compress or summarize — pass the data as-is. The goal is to minimize \
+redundant file I/O in subsequent steps while keeping dependencies explicit.
+
 Rules:
 1. Examine the Optimizer's output and any tool results in the conversation.
 2. Use safe_cli_executor to inspect files and filesystem state when needed. \
@@ -177,7 +205,9 @@ Rules:
 5. In your final verdict, provide:
    - verdict: "PASS" or "FAIL"
    - feedback: concrete explanation of why it passed or what went wrong
-   - key_outputs: dictionary of important values to remember (only on PASS)
+   - key_outputs: dictionary of important values to remember (only on PASS). \
+     Follow the Data Passing Responsibility guidelines above to extract data \
+     needed by subsequent steps.
 6. Be strict — only PASS if the criteria are clearly met.
 7. NEVER call read_file, list_files, or any sub-command directly as a tool. \
    Always wrap them inside safe_cli_executor(tool_name=..., params={{...}}).

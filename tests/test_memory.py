@@ -39,6 +39,22 @@ class TestSkillMemory:
         result = format_skill_memory("key=value")
         assert result == "key=value"
 
+    def test_append_with_inline_data(self):
+        """Test that evaluator can pass inline data for next steps."""
+        result = append_skill_memory(
+            "",
+            {
+                "company": "AAPL",
+                "calendar_year": "2024",
+                "transcript_path": "skills\\ects_skill\\tmp\\transcript.txt",
+                "transcript_length": "45230",
+            },
+        )
+        assert "company=AAPL" in result
+        assert "calendar_year=2024" in result
+        assert "transcript_path=" in result
+        assert "transcript_length=45230" in result
+
 
 class TestLoopMessages:
     def test_clear_returns_empty(self):
