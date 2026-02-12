@@ -4,7 +4,8 @@ import json
 import sys
 from pathlib import Path
 
-SKILL_DIR = Path(__file__).resolve().parent
+# Output paths are relative to cwd (PROJECT_ROOT), set by safe_py_runner.
+SKILL_TMP = Path("skills/ects_skill/tmp")
 
 
 def parse_response(raw_path: str | Path | None = None) -> dict:
@@ -13,7 +14,8 @@ def parse_response(raw_path: str | Path | None = None) -> dict:
     Parameters
     ----------
     raw_path : str | Path | None
-        Path to raw_response.json. Defaults to ``ects_skill\\tmp\\raw_response.json``.
+        Path to raw_response.json.
+        Defaults to ``skills/ects_skill/tmp/raw_response.json`` (relative to PROJECT_ROOT).
 
     Returns
     -------
@@ -21,7 +23,7 @@ def parse_response(raw_path: str | Path | None = None) -> dict:
         Keys: transcript, company, calendar_year, calendar_quarter.
     """
     if raw_path is None:
-        raw_path = SKILL_DIR / "tmp" / "raw_response.json"
+        raw_path = SKILL_TMP / "raw_response.json"
     raw_path = Path(raw_path)
 
     response = json.loads(raw_path.read_text(encoding="utf-8"))
@@ -51,13 +53,13 @@ def main() -> None:
         sys.exit(1)
 
     # Save transcript text
-    transcript_path = SKILL_DIR / "tmp" / "transcript.txt"
-    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    SKILL_TMP.mkdir(parents=True, exist_ok=True)
+    transcript_path = SKILL_TMP / "transcript.txt"
     transcript_path.write_text(data["transcript"], encoding="utf-8")
     print(f"Transcript saved to {transcript_path}")
 
     # Save metadata alongside
-    meta_path = SKILL_DIR / "tmp" / "metadata.json"
+    meta_path = SKILL_TMP / "metadata.json"
     meta = {k: v for k, v in data.items() if k != "transcript"}
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"Metadata saved to {meta_path}")

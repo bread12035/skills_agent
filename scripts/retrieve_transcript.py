@@ -13,7 +13,8 @@ API_URL = os.environ.get("TRANSCRIPT_API_URL", "")
 API_TOKEN = os.environ.get("TRANSCRIPT_API_TOKEN", "")
 # ────────────────────────────────────────────────────────────────
 
-OUTPUT_DIR = Path(__file__).parent / "tmp"
+# Output path is relative to cwd (PROJECT_ROOT), set by safe_py_runner.
+OUTPUT_DIR = Path("skills/ects_skill/tmp")
 
 
 def retrieve_transcript(company: str, fiscal_year: str, fiscal_quarter: str) -> dict:
@@ -67,8 +68,7 @@ def main() -> None:
     print(f"Retrieving transcript for {company} FY{fiscal_year} {fiscal_quarter} ...")
     response = retrieve_transcript(company, fiscal_year, fiscal_quarter)
 
-    # Save raw response to standardized tmp/ directory
-    OUTPUT_DIR = Path(__file__).resolve().parent / "tmp"
+    # Save raw response to skills/ects_skill/tmp/ (relative to PROJECT_ROOT)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / "raw_response.json"
     output_path.write_text(json.dumps(response, indent=2), encoding="utf-8")

@@ -22,11 +22,13 @@ Rules:
 7. Simplify multi-condition criteria into clear, independently verifiable checks.
 8. Each step's criteria should be concrete and measurable (file exists, exit code 0, \
    JSON contains key X, etc.) — never vague ("looks correct", "seems right").
-9. **Path Format — Windows Style REQUIRED**: All file paths in `instruction` and `criteria` \
-   fields MUST use Windows-style backslashes (\\). \
-   CORRECT: "ects_skill\\tmp\\output.json"  WRONG: "ects_skill/tmp/output.json". \
-   CORRECT: "hello_skill\\output.txt"       WRONG: "hello_skill/output.txt". \
-   CORRECT: "scripts\\format_check.py"      WRONG: "scripts/format_check.py".
+9. **Path Format — Project-Root-Relative, Windows Style REQUIRED**: All file paths \
+   in `instruction` and `criteria` fields MUST be relative to the project root and \
+   use Windows-style backslashes (\\). Always include the full path from the project \
+   root (e.g. include the "skills\\" prefix for skill artifacts). \
+   CORRECT: "skills\\ects_skill\\tmp\\output.json"  WRONG: "ects_skill\\tmp\\output.json". \
+   CORRECT: "skills\\hello_skill\\output.txt"       WRONG: "hello_skill/output.txt". \
+   CORRECT: "scripts\\format_check.py"              WRONG: "scripts/format_check.py".
 
 Output ONLY the structured JSON matching the SkillPlan schema.
 """
@@ -65,13 +67,25 @@ Example — to list files:
 {tool_docs}
 
 ### Path Format — Windows Style REQUIRED
-All `path` parameters MUST use Windows-style backslashes (\\).
+All `path` parameters MUST be relative to the **project root** and use \
+Windows-style backslashes (\\). Both safe_cli_executor and safe_py_runner \
+execute with cwd = project root, so every relative path resolves from there.
   CORRECT: "skills\\\\ects_skill\\\\tmp\\\\output.json"
   WRONG:   "skills/ects_skill/tmp/output.json"
+  WRONG:   "ects_skill\\\\tmp\\\\output.json"   ← missing "skills\\\\" prefix
   CORRECT: "scripts\\\\format_check.py"
   WRONG:   "scripts/format_check.py"
 Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
 Just pass the plain path string with backslashes.
+
+### safe_py_runner — Script Paths
+safe_py_runner accepts scripts from two directories:
+  - scripts/           — shared utility scripts
+  - skills/<skill>/    — skill-specific scripts
+Pass the project-root-relative path as script_name. Backslashes are normalised \
+automatically. Examples:
+  safe_py_runner(script_name="scripts/format_check.py")
+  safe_py_runner(script_name="skills/ects_skill/retrieve_transcript.py", args=["AAPL", "2024", "Q1"])
 
 Rules:
 1. Use the provided tools to accomplish the step instruction.
@@ -84,7 +98,7 @@ Rules:
 5. Do NOT continue making tool calls after the success criteria are satisfied. \
    Extra unnecessary tool calls waste resources and may introduce errors.
 6. If the step instruction says to reload context from files (because step_memory was \
-   cleared), read the required files from ects_skill\\tmp\\ before proceeding.
+   cleared), read the required files from skills\\ects_skill\\tmp\\ before proceeding.
 7. NEVER call read_file, list_files, write_json, or any sub-command directly as a tool. \
    Always wrap them inside safe_cli_executor(tool_name=..., params={{...}}).
 """
@@ -119,9 +133,12 @@ Example — to list files:
   WRONG:   list_files(path="skills/ects_skill/tmp")          ← This will ERROR
 
 ### Path Format — Windows Style REQUIRED
-All `path` parameters MUST use Windows-style backslashes (\\).
+All `path` parameters MUST be relative to the **project root** and use \
+Windows-style backslashes (\\). Both safe_cli_executor and safe_py_runner \
+execute with cwd = project root, so every relative path resolves from there.
   CORRECT: "skills\\\\ects_skill\\\\tmp\\\\output.json"
   WRONG:   "skills/ects_skill/tmp/output.json"
+  WRONG:   "ects_skill\\\\tmp\\\\output.json"   ← missing "skills\\\\" prefix
   CORRECT: "scripts\\\\format_check.py"
   WRONG:   "scripts/format_check.py"
 Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
