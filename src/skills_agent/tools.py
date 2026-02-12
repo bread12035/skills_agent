@@ -71,6 +71,27 @@ def _normalise_path_params(params: dict[str, str], param_rules: dict[str, str]) 
     return normalised
 
 
+_SAFE_CMD_VALUE_RE = re.compile(r'^[a-zA-Z0-9_.\\-]+$')
+
+
+def _cmd_quote(value: str) -> str:
+    """Quote a value for Windows CMD.
+
+    Values containing only path-safe characters (alphanumeric, dot, underscore,
+    backslash, hyphen) are returned unquoted — the regex validation layer
+    already guarantees safety.
+
+    Values with spaces or other characters are wrapped in double quotes
+    (the correct quoting mechanism for CMD), with any interior double quotes
+    escaped.  UNIX-style single-quote wrapping (as produced by shlex.quote)
+    must NOT be used because CMD treats single quotes as literal characters.
+    """
+    if _SAFE_CMD_VALUE_RE.fullmatch(value):
+        return value
+    escaped = value.replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, int]:
     """Validate parameters against whitelist and build the final command string.
 
@@ -98,8 +119,10 @@ def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, in
                 f"allowed pattern {regex!r}"
             )
 
-    # Build command with shlex quoting
-    quoted = {k: shlex.quote(v) for k, v in params.items()}
+    # Build command — parameters are already regex-validated so we use
+    # Windows CMD-compatible quoting instead of UNIX shlex.quote() which
+    # wraps values in single quotes (literal characters in CMD, not quotes).
+    quoted = {k: _cmd_quote(v) for k, v in params.items()}
     command = template.format(**quoted)
 
     # Final blocked-pattern scan on the assembled command
