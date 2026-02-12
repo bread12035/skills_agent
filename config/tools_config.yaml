@@ -103,10 +103,10 @@ cli_whitelist:
     timeout: 10
 
   python_run:
-    description: "Run a Python script from the scripts\\ directory"
+    description: "Run a Python script from scripts\\ or skills\\<skill>\\ directory"
     template: "python {script}"
     params:
-      script: "^scripts\\\\[a-zA-Z0-9_\\\\-]+\\.py$"
+      script: "^(scripts|skills)\\\\[a-zA-Z0-9_\\\\-]+(\\\\.py|\\\\[a-zA-Z0-9_\\\\-]+\\.py)$"
     timeout: 120
 
 # Blocked patterns — commands that must NEVER be executed

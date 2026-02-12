@@ -52,6 +52,59 @@ skills_agent/
 └── .env.example         # Environment variable template
 ```
 
+## Path Conventions for `skills.md`
+
+Both `safe_cli_executor` and `safe_py_runner` execute commands with
+**`cwd` = project root** (the directory containing `pyproject.toml`).
+All paths in skill definitions must be **relative to the project root**.
+
+### CLI paths (`safe_cli_executor`)
+
+Use **Windows-style backslashes** starting from the project root:
+
+```
+# Reading a file
+safe_cli_executor(tool_name="read_file", params={"path": "skills\\ects_skill\\tmp\\transcript.txt"})
+
+# Listing a directory
+safe_cli_executor(tool_name="list_files", params={"path": "skills\\ects_skill\\tmp"})
+
+# Writing a file
+safe_cli_executor(tool_name="write_json", params={"path": "skills\\ects_skill\\tmp\\output.json", "content": "..."})
+```
+
+### Python script paths (`safe_py_runner`)
+
+Pass the **project-root-relative path** as `script_name`. Both forward slashes
+and backslashes are accepted. Allowed directories:
+
+| Directory | Description |
+|---|---|
+| `scripts/` | Shared utility scripts (e.g. `format_check.py`) |
+| `skills/<skill>/` | Skill-specific scripts (e.g. `retrieve_transcript.py`) |
+
+```
+# Shared script
+safe_py_runner(script_name="scripts/format_check.py")
+
+# Skill-specific script
+safe_py_runner(script_name="skills/ects_skill/retrieve_transcript.py", args=["AAPL", "2024", "Q1"])
+```
+
+### Writing a `skills.md`
+
+In the **Instruction** and **Criteria** fields of each step, always use
+the full project-root-relative path:
+
+```markdown
+# CORRECT — includes the full path from project root
+- **Instruction**: Read `skills\ects_skill\tmp\transcript.txt` ...
+- **Criteria**: `skills\ects_skill\tmp\transcript.txt` exists and is non-empty.
+
+# WRONG — missing the `skills\ects_skill\` prefix
+- **Instruction**: Read `ects_skill\tmp\transcript.txt` ...
+```
+
 ## Development
 
 ```bash

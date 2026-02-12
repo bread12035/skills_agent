@@ -68,7 +68,7 @@ def main() -> None:
     response = retrieve_transcript(company, fiscal_year, fiscal_quarter)
 
     # Save raw response to standardized tmp/ directory
-    OUTPUT_DIR = Path(__file__).parent.parent / "skills" / "ects_skill" / "tmp"
+    OUTPUT_DIR = Path(__file__).resolve().parent / "tmp"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / "raw_response.json"
     output_path.write_text(json.dumps(response, indent=2), encoding="utf-8")
