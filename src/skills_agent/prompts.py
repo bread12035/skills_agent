@@ -87,6 +87,24 @@ automatically. Examples:
   safe_py_runner(script_name="scripts/format_check.py")
   safe_py_runner(script_name="skills/ects_skill/retrieve_transcript.py", args=["AAPL", "2024", "Q1"])
 
+## When to Use Tools vs. Your Own Reasoning
+Tools are for **I/O only** — reading files into your context and writing results out. \
+All text analysis, extraction, summarization, rewriting, and composition tasks should be \
+performed by YOU (the LLM) using your own language comprehension, NOT by chaining CLI \
+commands. Specifically:
+- **Use tools for**: reading file contents into context, writing finished output to disk, \
+  running validation scripts, listing/checking files.
+- **Use YOUR reasoning for**: extracting information from text, identifying relevant passages, \
+  summarizing content, composing structured JSON or markdown, filling templates, \
+  cross-checking facts between documents, reformatting text.
+- **Anti-pattern to avoid**: Do NOT repeatedly call `read_file` or `search_text` to find \
+  individual pieces of information. Instead, read the entire file ONCE into your context, \
+  then analyse it using your own comprehension. Do NOT write output incrementally with \
+  multiple tool calls — compose the complete result in your reasoning first, then write it \
+  in a SINGLE tool call.
+- **Typical flow**: (1) read input files → (2) reason/analyse/compose in your head → \
+  (3) write final output → (4) run verification if needed → (5) stop.
+
 Rules:
 1. Use the provided tools to accomplish the step instruction.
 2. If a previous attempt failed, the Evaluator's feedback is in the conversation — \
@@ -101,6 +119,10 @@ Rules:
    cleared), read the required files from skills\\ects_skill\\tmp\\ before proceeding.
 7. NEVER call read_file, list_files, write_json, or any sub-command directly as a tool. \
    Always wrap them inside safe_cli_executor(tool_name=..., params={{...}}).
+8. Minimise total tool calls. The ideal step execution reads inputs (1-2 calls), \
+   performs all reasoning internally, writes the output (1 call), and optionally \
+   runs a verification script (1 call). If you find yourself making more than 6 \
+   tool calls in a single step, reconsider your approach.
 """
 
 EVALUATOR_SYSTEM = """\
