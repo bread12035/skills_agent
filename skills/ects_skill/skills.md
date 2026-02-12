@@ -20,8 +20,7 @@ execute commands with `cwd = PROJECT_ROOT`, so every path must start from there.
   Example: `skills\ects_skill\tmp\transcript.txt`
 - **Python script paths** (for `safe_py_runner`): use forward slashes or
   backslashes — both are accepted.
-  Example: `skills/ects_skill/retrieve_transcript.py` or
-  `skills\ects_skill\retrieve_transcript.py`
+  Example: `scripts/retrieve_transcript.py` or `scripts\retrieve_transcript.py`
 
 ## Artifact Directory
 
@@ -39,7 +38,7 @@ After each step completes, `step_memory` (L3 loop messages) is cleared. Subseque
 ## Steps
 
 ### Step 1 — Retrieve and parse transcript
-- **Instruction**: Run `skills\ects_skill\retrieve_transcript.py` (via `safe_py_runner` with script_name `skills/ects_skill/retrieve_transcript.py`) with the company ticker, fiscal year, and fiscal quarter to fetch the raw transcript from the API. The script reads `TRANSCRIPT_API_URL` and `TRANSCRIPT_API_TOKEN` from environment variables automatically. Then run `skills\ects_skill\parse_transcript.py` (via `safe_py_runner` with script_name `skills/ects_skill/parse_transcript.py`) to extract the transcript text and metadata. Both scripts save outputs to `skills\ects_skill\tmp\`. Once `skills\ects_skill\tmp\transcript.txt` and `skills\ects_skill\tmp\metadata.json` exist and are valid, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
+- **Instruction**: Run `scripts\retrieve_transcript.py` (via `safe_py_runner` with script_name `scripts/retrieve_transcript.py`) with the company ticker, fiscal year, and fiscal quarter to fetch the raw transcript from the API. The script reads `TRANSCRIPT_API_URL` and `TRANSCRIPT_API_TOKEN` from environment variables automatically. Then run `scripts\parse_transcript.py` (via `safe_py_runner` with script_name `scripts/parse_transcript.py`) to extract the transcript text and metadata. Both scripts save outputs to `skills\ects_skill\tmp\`. Once `skills\ects_skill\tmp\transcript.txt` and `skills\ects_skill\tmp\metadata.json` exist and are valid, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
 - **Criteria**: `skills\ects_skill\tmp\raw_response.json` exists and is valid JSON. `skills\ects_skill\tmp\transcript.txt` exists and is non-empty. `skills\ects_skill\tmp\metadata.json` exists and contains all fields (company, calendar_year, calendar_quarter) with no missing data.
 - **Tools**: `safe_py_runner`
 
