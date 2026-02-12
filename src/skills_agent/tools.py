@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field
 # Config loading
 # ---------------------------------------------------------------------------
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "tools_config.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_CONFIG_PATH = PROJECT_ROOT / "config" / "tools_config.yaml"
 
 
 def _load_config(path: Path = _CONFIG_PATH) -> dict[str, Any]:
@@ -116,6 +117,7 @@ def _run_command(command: str, timeout: int) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=str(PROJECT_ROOT),
         )
         output = result.stdout
         if result.returncode != 0:
@@ -153,15 +155,16 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     IMPORTANT: This is the ONLY way to run CLI commands. Do NOT call sub-commands
     (read_file, list_files, etc.) as separate tools — they must be passed as tool_name.
 
-    All path values in params MUST use Windows-style backslashes (\\).
-    Forward slashes (/) are NOT allowed in path parameters.
+    All commands execute with cwd = PROJECT ROOT (the repository root).
+    All path values in params MUST be relative to the project root and use
+    Windows-style backslashes (\\). Forward slashes (/) are NOT allowed.
 
     Usage: safe_cli_executor(tool_name="<sub_command>", params={"path": "folder\\\\file.txt"})
 
     Examples:
-      safe_cli_executor(tool_name="read_file", params={"path": "skills\\\\ects_skill\\\\skills.md"})
+      safe_cli_executor(tool_name="read_file", params={"path": "skills\\\\ects_skill\\\\tmp\\\\transcript.txt"})
       safe_cli_executor(tool_name="list_files", params={"path": "skills\\\\ects_skill\\\\tmp"})
-      safe_cli_executor(tool_name="write_json", params={"path": "ects_skill\\\\tmp\\\\output.json", "content": "..."})
+      safe_cli_executor(tool_name="write_json", params={"path": "skills\\\\ects_skill\\\\tmp\\\\output.json", "content": "..."})
 
     Available sub-commands (pass as tool_name):
     - list_files: params={path}
@@ -210,9 +213,12 @@ def safe_py_runner(
     args: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
 ) -> str:
-    """Execute a Python script from the approved scripts\\ directory.
+    """Execute a Python script from approved directories.
 
-    Only scripts located in the scripts\\ directory are allowed.
+    Allowed directories:
+      - scripts\\           — shared utility scripts
+      - skills\\<skill>\\   — skill-specific scripts (e.g. skills\\ects_skill\\parse_transcript.py)
+
     Arguments and env vars are validated for safety.
     """
     import os
@@ -222,13 +228,27 @@ def safe_py_runner(
     if env_vars is None:
         env_vars = {}
 
-    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    scripts_dir = PROJECT_ROOT / "scripts"
+    skills_dir = PROJECT_ROOT / "skills"
 
-    # Validate script path — must be inside scripts/ and end with .py
-    script_path = (scripts_dir / script_name).resolve()
-    if not script_path.is_relative_to(scripts_dir):
-        return "[SECURITY BLOCKED] Script path escapes the scripts/ directory."
-    if not script_path.suffix == ".py":
+    # Normalise Windows backslashes to forward slashes for Path resolution
+    normalised_name = script_name.replace("\\", "/")
+
+    # Determine which allowed directory the script belongs to
+    candidate = (PROJECT_ROOT / normalised_name).resolve()
+
+    allowed = False
+    if candidate.is_relative_to(scripts_dir):
+        allowed = True
+    elif candidate.is_relative_to(skills_dir):
+        allowed = True
+    if not allowed:
+        return (
+            "[SECURITY BLOCKED] Script path must be inside scripts/ or skills/<skill>/. "
+            f"Got: {script_name!r}"
+        )
+
+    if not candidate.suffix == ".py":
         return "[SECURITY BLOCKED] Only .py files are allowed."
 
     # Validate args — no shell metacharacters (before checking file existence)
@@ -247,6 +267,7 @@ def safe_py_runner(
             return f"[SECURITY BLOCKED] Env var value is invalid: {v!r}"
 
     # Check file existence (after all security validations pass)
+    script_path = candidate
     if not script_path.exists():
         return f"[ERROR] Script not found: {script_name}"
 
@@ -263,6 +284,7 @@ def safe_py_runner(
             text=True,
             timeout=120,
             env=env,
+            cwd=str(PROJECT_ROOT),
         )
         output = result.stdout
         if result.returncode != 0:
@@ -295,8 +317,9 @@ def get_tool_descriptions() -> str:
             f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
         )
     lines.append("")
-    lines.append("IMPORTANT: All path values MUST use Windows-style backslashes (\\\\).")
+    lines.append("IMPORTANT: All path values MUST be relative to the PROJECT ROOT and use Windows-style backslashes (\\\\).")
     lines.append("  CORRECT: 'skills\\\\ects_skill\\\\tmp\\\\output.json'")
     lines.append("  WRONG:   'skills/ects_skill/tmp/output.json'")
+    lines.append("  WRONG:   'ects_skill\\\\tmp\\\\output.json'  ← missing 'skills\\\\' prefix")
     lines.append("Forward slashes in paths are NOT allowed and will be rejected.")
     return "\n".join(lines)
