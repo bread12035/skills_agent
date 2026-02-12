@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from typing import Any
+from dotenv import load_dotenv 
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
@@ -40,6 +41,7 @@ from skills_agent.prompts import (
 from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, READONLY_TOOLS, get_tool_descriptions
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Logging helpers
@@ -88,8 +90,11 @@ _DEFAULT_MODEL = "gpt-oss"
 
 def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
     base_url = os.environ.get("OPENAI_API_BASE")
+    api_key = os.envrion.get("OPENAI_API_KEY")
     if base_url:
         kwargs.setdefault("openai_api_base", base_url)
+    if api_key:
+        kwargs.setdefault("openai_api_key", api_key)
     return ChatOpenAI(model=model, **kwargs)
 
 
