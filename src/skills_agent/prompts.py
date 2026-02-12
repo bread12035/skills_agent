@@ -10,6 +10,18 @@ Rules:
 3. Use the `tools_hint` field to suggest which tools the executor might need.
 4. Keep steps atomic — one logical action per step.
 5. If the task is simple, a single step is fine.
+6. When structuring steps from a skill document that contains prior execution history \
+   (Success Cases, Failure Cases, Human Feedback sections), incorporate these learnings:
+   - For **Failure Cases**: identify the root cause and add explicit guardrails or \
+     alternative approaches in the relevant step's instruction to prevent the same failure.
+   - For **Success Cases**: preserve the successful execution path as the primary approach. \
+     Reference key outputs from prior successes when they inform subsequent steps.
+   - For **Human Feedback**: treat as the highest-priority directive. If feedback contradicts \
+     the original instruction, the feedback takes precedence. Integrate feedback as explicit \
+     constraints or modifications to the affected steps.
+7. Simplify multi-condition criteria into clear, independently verifiable checks.
+8. Each step's criteria should be concrete and measurable (file exists, exit code 0, \
+   JSON contains key X, etc.) — never vague ("looks correct", "seems right").
 
 Output ONLY the structured JSON matching the SkillPlan schema.
 """
@@ -34,8 +46,13 @@ Rules:
 2. If a previous attempt failed, the Evaluator's feedback is in the conversation — \
    use it to fix your approach.
 3. Be precise and methodical. Execute one tool call at a time.
-4. When you believe the step is complete, respond with a plain-text summary of what \
-   you accomplished (no tool call). This signals completion.
+4. When you believe the step is complete and all success criteria are met, you MUST \
+   immediately stop making tool calls and respond with a plain-text summary of what \
+   you accomplished. This signals completion and hands control to the Evaluator.
+5. Do NOT continue making tool calls after the success criteria are satisfied. \
+   Extra unnecessary tool calls waste resources and may introduce errors.
+6. If the step instruction says to reload context from files (because step_memory was \
+   cleared), read the required files from ects_skill/tmp/ before proceeding.
 """
 
 EVALUATOR_SYSTEM = """\

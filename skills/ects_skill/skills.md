@@ -2,24 +2,45 @@
 
 Summarize an earnings call transcript by retrieving data, extracting key snippets, and producing a structured AI summary from a template.
 
+## Environment
+
+The following environment variables must be set before execution:
+- `TRANSCRIPT_API_URL` — Base URL for the transcript retrieval API.
+- `TRANSCRIPT_API_TOKEN` — Bearer token for API authentication.
+
+These are injected automatically into `safe_py_runner` from the host environment.
+
+## Artifact Directory
+
+All intermediate and final artifacts are saved to `ects_skill/tmp/`:
+- `raw_response.json` — Raw API response from retrieve_transcript.py
+- `metadata.json` — Extracted company, calendar_year, calendar_quarter
+- `transcript.txt` — Extracted transcript text
+- `extracted_snippets.json` — Structured snippets per topic
+- `ai_summary.md` — Final filled summary template
+
+## Context Strategy
+
+After each step completes, `step_memory` (L3 loop messages) is cleared. Subsequent steps reload any required context by reading the standardized files from `ects_skill/tmp/`. This keeps each step's context window clean and deterministic.
+
 ## Steps
 
 ### Step 1 — Retrieve and parse transcript
-- **Instruction**: Run `retrieve_transcript.py` with the company ticker, fiscal year, and fiscal quarter to fetch the raw transcript. Then run `parse_transcript.py` to extract the transcript text and metadata. Save the transcript to `ects_skill/tmp/transcript.txt`.
-- **Criteria**: `ects_skill/tmp/transcript.txt` exists and is non-empty. All metadata fields (company, calendar_year, calendar_quarter) are present with no missing data.
+- **Instruction**: Run `retrieve_transcript.py` with the company ticker, fiscal year, and fiscal quarter to fetch the raw transcript from the API. The script reads `TRANSCRIPT_API_URL` and `TRANSCRIPT_API_TOKEN` from environment variables automatically. Then run `parse_transcript.py` to extract the transcript text and metadata. Both scripts save outputs to `ects_skill/tmp/`. Once `ects_skill/tmp/transcript.txt` and `ects_skill/tmp/metadata.json` exist and are valid, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
+- **Criteria**: `ects_skill/tmp/raw_response.json` exists and is valid JSON. `ects_skill/tmp/transcript.txt` exists and is non-empty. `ects_skill/tmp/metadata.json` exists and contains all fields (company, calendar_year, calendar_quarter) with no missing data.
 - **Tools**: `safe_py_runner`
 
 ### Step 2 — Extract snippets of interest
-- **Instruction**: Read the transcript from `ects_skill/tmp/transcript.txt`. Extract structured snippets for each of the following topics: **Financial Numbers**, **Financial Description**, **Guidance**, **Product Performance**, **QA**. Generate a structured JSON output and save it to `ects_skill/tmp/extracted_snippets.json`.
-- **Criteria**: `ects_skill/tmp/extracted_snippets.json` exists and contains all five topics. Every number extracted must be verifiable in the original transcript — no hallucinated figures. Cross-check each numeric value against `ects_skill/tmp/transcript.txt`.
-- **Tools**: `safe_cli_executor`
+- **Instruction**: Read the transcript from `ects_skill/tmp/transcript.txt` and the metadata from `ects_skill/tmp/metadata.json` (reload context from files since step_memory was cleared). Extract structured snippets for each of the following topics: **Financial Numbers**, **Financial Description**, **Guidance**, **Product Performance**, **QA**. Generate a structured JSON output and save it to `ects_skill/tmp/extracted_snippets.json` using the `write_json` CLI tool or `safe_py_runner`. Once the JSON file is written and contains all five topics, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
+- **Criteria**: `ects_skill/tmp/extracted_snippets.json` exists and contains all five topics (Financial Numbers, Financial Description, Guidance, Product Performance, QA). Every number extracted must be verifiable in the original transcript — no hallucinated figures. Cross-check each numeric value against `ects_skill/tmp/transcript.txt`.
+- **Tools**: `safe_cli_executor`, `safe_py_runner`
 
 ### Step 3 — Fill template and format check
-- **Instruction**: Load the template from `ects_skill/reference/template.md`. Fill in the blanks with the extracted snippets from `ects_skill/tmp/extracted_snippets.json`. Run `format_check.py` to verify the filled template strictly follows the expected structure.
-- **Criteria**: The output strictly follows the template structure without any alterations to headings or section order. `format_check.py` exits with code 0.
+- **Instruction**: Read the extracted snippets from `ects_skill/tmp/extracted_snippets.json` and the template from `ects_skill/reference/template.md` (reload context from files since step_memory was cleared). Fill in the template blanks with the extracted snippets. Save the filled template to `ects_skill/tmp/ai_summary.md` using the `write_md` CLI tool or `safe_py_runner`. Run `format_check.py` to verify the filled template strictly follows the expected structure. Once `format_check.py` exits with code 0, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
+- **Criteria**: `ects_skill/tmp/ai_summary.md` exists and strictly follows the template structure without any alterations to headings or section order. `format_check.py` exits with code 0.
 - **Tools**: `safe_py_runner`, `safe_cli_executor`
 
-### Step 4 — Output AI summary
-- **Instruction**: Write the final filled template as `ects_skill/tmp/ai_summary.md`.
-- **Criteria**: `ects_skill/tmp/ai_summary.md` exists and is non-empty.
+### Step 4 — Verify final output
+- **Instruction**: Read `ects_skill/tmp/ai_summary.md` to confirm it exists and is non-empty (reload context from file since step_memory was cleared). Verify the summary is well-formed and complete. Once verified, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
+- **Criteria**: `ects_skill/tmp/ai_summary.md` exists, is non-empty, and contains all expected sections from the template.
 - **Tools**: `safe_cli_executor`

@@ -21,9 +21,9 @@ class TestValidateAndBuild:
         assert "dir" in cmd
         assert timeout == 10
 
-    def test_valid_git_status(self):
-        cmd, timeout = _validate_and_build("git_status", {})
-        assert cmd == "git status"
+    def test_valid_read_file(self):
+        cmd, timeout = _validate_and_build("read_file", {"path": "test.txt"})
+        assert "type" in cmd
 
     def test_unknown_tool_rejected(self):
         with pytest.raises(ToolSecurityError, match="not in the whitelist"):
