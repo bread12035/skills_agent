@@ -106,14 +106,46 @@ def _append_skill_learning(md_path: Path, section: str, content: str) -> None:
     md_path.write_text(updated, encoding="utf-8")
 
 
-def _save_step_evaluation(md_path: Path, step_info: str, evaluation: EvaluationOutput) -> None:
-    """Save a step evaluation result to skills.md as a success or failure case."""
+def _save_step_evaluation(
+    md_path: Path, step_info: str, evaluation: EvaluationOutput, state: dict | None = None
+) -> None:
+    """Save a step evaluation result to skills.md with execution sequence."""
     if evaluation.verdict.value == "PASS":
         section = "Success Cases"
+
+        # Extract optimizer's execution sequence from messages
+        execution_sequence = []
+        messages = state.get("messages", []) if state else []
+
+        for i, msg in enumerate(messages, 1):
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tool_name = tc.get("name", "unknown")
+                    tool_args = tc.get("args", {})
+                    args_str = ", ".join(
+                        f"{k}={repr(v)[:50]}" for k, v in tool_args.items()
+                    )
+                    execution_sequence.append(f"{i}. {tool_name}({args_str})")
+            elif (
+                hasattr(msg, "content")
+                and isinstance(msg.content, str)
+                and len(msg.content) > 0
+                and msg.content.strip()
+                and not msg.content.startswith("[Evaluator]")
+            ):
+                preview = msg.content[:200].replace("\n", " ")
+                execution_sequence.append(f'{i}. Optimizer response: "{preview}..."')
+
+        exec_seq_text = (
+            "\n".join(execution_sequence)
+            if execution_sequence
+            else "(no tool calls recorded)"
+        )
+
         content = (
             f"**Step:** {step_info}\n"
-            f"**Feedback:** {evaluation.feedback}\n"
-            f"**Key Outputs:** {json.dumps(evaluation.key_outputs, indent=2)}\n"
+            f"**Execution Sequence:**\n{exec_seq_text}\n\n"
+            f"**Key Outputs:**\n{json.dumps(evaluation.key_outputs, indent=2)}\n"
         )
     else:
         section = "Failure Cases"
@@ -198,7 +230,7 @@ def run(skill_content: str, md_path: Path) -> dict:
                 if prev_step_index < len(steps):
                     step = steps[prev_step_index]
                     step_info = f"Step {step.index}: {step.instruction}"
-                    _save_step_evaluation(md_path, step_info, evaluation)
+                    _save_step_evaluation(md_path, step_info, evaluation, result)
                     logger.info(
                         "Saved %s case for step %d to %s",
                         evaluation.verdict.value,
