@@ -38,7 +38,7 @@ cli_whitelist:
 
   write_json:
     description: "Write content to a .json file"
-    template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
+    template: "powershell -Command \"Set-Content -Path {path} -Value '{content}'\""
     params:
       path: "^[a-zA-Z0-9_.\\\\-]+\\.json$"
       content: "^[\\s\\S]+$"
@@ -46,7 +46,7 @@ cli_whitelist:
 
   write_txt:
     description: "Write content to a .txt file"
-    template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
+    template: "powershell -Command \"Set-Content -Path {path} -Value '{content}'\""
     params:
       path: "^[a-zA-Z0-9_.\\\\-]+\\.txt$"
       content: "^[\\s\\S]+$"
@@ -54,7 +54,7 @@ cli_whitelist:
 
   write_md:
     description: "Write content to a .md file"
-    template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
+    template: "powershell -Command \"Set-Content -Path {path} -Value '{content}'\""
     params:
       path: "^[a-zA-Z0-9_.\\\\-]+\\.md$"
       content: "^[\\s\\S]+$"
