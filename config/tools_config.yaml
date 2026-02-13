@@ -38,7 +38,7 @@ cli_whitelist:
 
   write_json:
     description: "Write content to a .json file"
-    template: "powershell -Command \"Set-Content -Path {path} -Value {content}\""
+    template: "powershell -Command \"Set-Content -Path {path} -Value '{content}'\""
     params:
       path: "^[a-zA-Z0-9_.\\\\-]+\\.json$"
       content: "^[\\s\\S]+$"
