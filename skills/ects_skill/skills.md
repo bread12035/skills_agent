@@ -46,40 +46,112 @@ The agent uses a three-layer memory system:
 Files written to disk (`skills\ects_skill\tmp\`) serve as persistent backups and
 verification targets. The primary data flow between steps is via L2 skill memory.
 
+## Task Decomposition Rules
+
+Each step is physically bounded by one of the following constraints:
+- **Tool-bound step**: at most **5 tool calls** total (read + write + verify combined).
+- **Text-processing step**: **0 tool calls** — the LLM performs extraction, summarization, rewriting, or composition entirely within its reasoning. Output is held in LLM context and passed to the next step via the Evaluator's key_outputs → L2 memory.
+
+If a logical task requires more than 5 tool calls, it MUST be split into two or more steps. If a task mixes I/O and text processing, the I/O phase and text-processing phase are separate steps.
+
+## Completion Protocol
+
+- As soon as the step's success criteria are satisfied, the Optimizer MUST immediately **stop all tool calls** and emit a plain-text summary to hand off to the Evaluator.
+- The Evaluator verifies criteria, then extracts **all data required by subsequent steps** into `key_outputs`. These key_outputs are committed to L2 skill memory and become the sole data bridge to the next step.
+- No step should rely on re-reading files that a previous Evaluator already extracted into L2 memory.
+
 ## Steps
 
-### Step 1 — Retrieve and parse transcript
-- **Instruction**: Run `scripts\retrieve_transcript.py` (via `safe_py_runner` with script_name `scripts/retrieve_transcript.py`) with the company ticker, fiscal year, and fiscal quarter to fetch the raw transcript from the API. The script reads `TRANSCRIPT_API_URL` and `TRANSCRIPT_API_TOKEN` from environment variables automatically. Then run `scripts\parse_transcript.py` (via `safe_py_runner` with script_name `scripts/parse_transcript.py`) to extract the transcript text and metadata. Both scripts save outputs to `skills\ects_skill\tmp\`. Once `skills\ects_skill\tmp\transcript.txt` and `skills\ects_skill\tmp\metadata.json` exist and are valid, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
-- **Criteria**: `skills\ects_skill\tmp\raw_response.json` exists and is valid JSON. `skills\ects_skill\tmp\transcript.txt` exists and is non-empty. `skills\ects_skill\tmp\metadata.json` exists and contains all fields (company, calendar_year, calendar_quarter) with no missing data.
-- **Evaluator key_outputs** (required by Step 2): `company`, `calendar_year`, `calendar_quarter` (read from metadata.json), `transcript_path=skills\ects_skill\tmp\transcript.txt`.
-- **Tools**: `safe_py_runner`
+### Step 1 — Retrieve raw transcript (Tool-bound: max 2 tool calls)
 
-### Step 2 — Extract snippets of interest
-- **Instruction**: This step requires YOU (the LLM) to do the text analysis — do NOT delegate extraction to CLI tools or scripts. Follow these phases strictly:
-  1. **Read phase (tools)**: Read metadata (company, calendar_year, calendar_quarter) and transcript_path from skill_memory (passed by Step 1 Evaluator). Use `safe_cli_executor` `read_file` to load the transcript file using the path from skill_memory. Do NOT re-read metadata.json — the values are already in skill_memory.
-  2. **Analyse phase (LLM reasoning — NO tool calls)**: With the transcript text now in your context, use your own language comprehension to identify and extract structured snippets for each of these five topics: **Financial Numbers**, **Financial Description**, **Guidance**, **Product Performance**, **QA**. For each topic, locate the relevant passages, pull exact quotes and figures directly from the transcript text, and compose the structured JSON object entirely within your reasoning. Every number and fact you include MUST appear verbatim in the transcript — do not infer, round, or fabricate any figures.
-  3. **Write phase (tools)**: Once you have composed the complete JSON in your reasoning, make a SINGLE call to `safe_cli_executor` with `write_json` to save the full JSON to `skills\ects_skill\tmp\extracted_snippets.json`. Do NOT write the file incrementally or topic-by-topic — write the entire JSON in one call.
-  4. **Stop**: Immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
-- **Criteria**: `skills\ects_skill\tmp\extracted_snippets.json` exists and contains all five topics (Financial Numbers, Financial Description, Guidance, Product Performance, QA). Every number extracted must be verifiable in the original transcript — no hallucinated figures. Cross-check each numeric value against `skills\ects_skill\tmp\transcript.txt`.
-- **Evaluator key_outputs** (required by Step 3): `extracted_snippets_path=skills\ects_skill\tmp\extracted_snippets.json`, `topics_count` (number of topics found).
-- **Tools**: `safe_cli_executor` (read_file for input, write_json for output)
+- **Task type**: Tool-bound I/O
+- **Tool sequence**:
+  1. `safe_py_runner` — run `scripts/retrieve_transcript.py` with args `[company, year, quarter]`
+  2. `safe_py_runner` — run `scripts/parse_transcript.py` (no args; reads `raw_response.json`)
+- **Instruction**: Run the two scripts in order. The first fetches the raw transcript from the API and saves `skills\ects_skill\tmp\raw_response.json`. The second extracts `skills\ects_skill\tmp\transcript.txt` and `skills\ects_skill\tmp\metadata.json`. Once both scripts complete successfully, **stop immediately** — do NOT read the output files; the Evaluator will inspect them.
+- **Criteria**: `skills\ects_skill\tmp\raw_response.json` exists and is valid JSON. `skills\ects_skill\tmp\transcript.txt` exists and is non-empty. `skills\ects_skill\tmp\metadata.json` exists and contains fields: company, calendar_year, calendar_quarter.
+- **Evaluator key_outputs** (required by Step 2): `company`, `calendar_year`, `calendar_quarter` (extracted from metadata.json), `transcript_path=skills\ects_skill\tmp\transcript.txt`.
+- **Evaluator data-passing responsibility**: Read `metadata.json` via `safe_cli_executor(read_file)`, extract the three metadata fields plus the transcript path, and store them all in `key_outputs` so Step 2 can consume them from L2 memory without re-reading metadata.json.
 
-### Step 3 — Fill template and format check
-- **Instruction**: This step requires YOU (the LLM) to do the text composition — do NOT delegate template filling to CLI tools or scripts. Follow these phases strictly:
-  1. **Read phase (tools)**: Use `safe_cli_executor` `read_file` to load both `skills\ects_skill\tmp\extracted_snippets.json` and `skills\ects_skill\reference\template.md` into your context. These are the ONLY tool calls needed for input.
-  2. **Compose phase (LLM reasoning — NO tool calls)**: With the snippets and template now in your context, use your own language ability to fill in every `[placeholder]` in the template with the corresponding data from the snippets JSON. Preserve all headings, section order, markdown formatting, and bold markers exactly as they appear in the template. Replace ONLY the bracketed placeholders — do not add, remove, or reorder any sections. Compose the entire filled markdown document within your reasoning before writing it.
-  3. **Write phase (tools)**: Make a SINGLE call to `safe_cli_executor` with `write_md` to save the complete filled template to `skills\ects_skill\tmp\ai_summary.md`. Write the entire document in one call.
-  4. **Verify phase (tools)**: Run `format_check.py` (via `safe_py_runner` with script_name `scripts/format_check.py` and args `["skills/ects_skill/tmp/ai_summary.md"]`) to validate structure. If it fails, read the error, fix the markdown in your reasoning, and re-write with `write_md` — do NOT attempt to patch the file with CLI text tools.
-  5. **Stop**: Once `format_check.py` exits with code 0, immediately stop executing tools and provide a plain-text summary to hand off to the Evaluator.
-- **Criteria**: `skills\ects_skill\tmp\ai_summary.md` exists and strictly follows the template structure without any alterations to headings or section order. `format_check.py` exits with code 0.
-- **Evaluator key_outputs** (required by Step 4): `summary_path=skills\ects_skill\tmp\ai_summary.md`, `format_check_exit_code=0`.
-- **Tools**: `safe_cli_executor` (read_file for input, write_md for output), `safe_py_runner` (format_check.py for validation)
+### Step 2 — Load transcript into context (Tool-bound: max 1 tool call)
 
-### Step 4 — Verify final output
-- **Instruction**: This is a verification step combining tool I/O with LLM-native analysis.
-  1. **Read phase (tools)**: Use `safe_cli_executor` `read_file` to load `skills\ects_skill\tmp\ai_summary.md` and `skills\ects_skill\tmp\transcript.txt` into your context.
-  2. **Verify phase (LLM reasoning — NO tool calls)**: With both documents in your context, confirm: (a) the summary is non-empty and contains all expected sections from the template (Financial Highlights, Briefing of Key Message, Key Message, Key insights from Q&A session); (b) spot-check that key figures and facts in the summary actually appear in the transcript — flag any that look fabricated or cannot be found.
-  3. **Stop**: Immediately provide a plain-text summary of your verification findings to hand off to the Evaluator.
-- **Criteria**: `skills\ects_skill\tmp\ai_summary.md` exists, is non-empty, and contains all expected sections from the template. No hallucinated figures — key numbers must be traceable to `skills\ects_skill\tmp\transcript.txt`.
+- **Task type**: Tool-bound I/O (read only)
+- **Tool sequence**:
+  1. `safe_cli_executor(read_file)` — read `skills\ects_skill\tmp\transcript.txt` (path from L2 `transcript_path`)
+- **Instruction**: Read the transcript file path from L2 skill memory (`transcript_path`). Use `safe_cli_executor` `read_file` to load the full transcript into context. Do NOT re-read `metadata.json` — company, calendar_year, calendar_quarter are already in L2 memory. After reading the transcript, **stop immediately** and provide the full transcript text in your plain-text summary to hand off to the Evaluator.
+- **Criteria**: The transcript text has been loaded into context and is non-empty.
+- **Evaluator key_outputs** (required by Step 3): `transcript_text` (the full transcript content, stored in L2 memory so Step 3 can process it without file I/O).
+- **Evaluator data-passing responsibility**: The Evaluator receives the transcript text from the Optimizer's summary. Store the full transcript text in `key_outputs["transcript_text"]` for the next step. If the text exceeds L2 capacity, store a confirmation flag `transcript_loaded=true` and the path so Step 3 can re-read if needed.
+
+### Step 3 — Extract snippets of interest (Text-processing: 0 tool calls)
+
+- **Task type**: Text-processing (NO tool calls allowed)
+- **Instruction**: This is a pure text-processing step. You MUST NOT call any tools. Using the transcript text available from L2 memory (or from the Evaluator's feedback in L3 context), plus company/year/quarter from L2, perform the following analysis entirely within your LLM reasoning:
+  1. Identify and extract structured snippets for each of these five topics: **Financial Numbers**, **Financial Description**, **Guidance**, **Product Performance**, **QA**.
+  2. For each topic, locate relevant passages, pull exact quotes and figures directly from the transcript text.
+  3. Every number and fact MUST appear verbatim in the transcript — do not infer, round, or fabricate any figures.
+  4. Compose the complete JSON object with all five topics in your reasoning.
+  5. Output the complete JSON in your plain-text summary to hand off to the Evaluator.
+- **Criteria**: The output contains a valid JSON structure with all five topics (Financial Numbers, Financial Description, Guidance, Product Performance, QA). Every number extracted is verifiable in the original transcript.
+- **Evaluator key_outputs** (required by Step 4): `extracted_snippets_json` (the full JSON string), `topics_count` (number of topics).
+- **Evaluator data-passing responsibility**: Parse the JSON from the Optimizer's output, validate it has 5 topics, verify at least a sample of numbers against the transcript text in L2 memory, then store the full JSON string in `key_outputs["extracted_snippets_json"]` for Step 4.
+
+### Step 4 — Write snippets to disk (Tool-bound: max 1 tool call)
+
+- **Task type**: Tool-bound I/O (write only)
+- **Tool sequence**:
+  1. `safe_cli_executor(write_json)` — write the extracted snippets JSON to `skills\ects_skill\tmp\extracted_snippets.json`
+- **Instruction**: Retrieve the `extracted_snippets_json` from L2 skill memory. Use a SINGLE `safe_cli_executor` `write_json` call to write the complete JSON to `skills\ects_skill\tmp\extracted_snippets.json`. Then **stop immediately**.
+- **Criteria**: `skills\ects_skill\tmp\extracted_snippets.json` exists and contains all five topics.
+- **Evaluator key_outputs** (required by Step 5): `extracted_snippets_path=skills\ects_skill\tmp\extracted_snippets.json`.
+- **Evaluator data-passing responsibility**: Verify the file exists and contains valid JSON with 5 topics. Store the path in key_outputs.
+
+### Step 5 — Compose filled summary (Text-processing: 0 tool calls)
+
+- **Task type**: Text-processing (NO tool calls allowed)
+- **Instruction**: This is a pure text-processing step. You MUST NOT call any tools. Using the `extracted_snippets_json` from L2 memory and the template structure (you will read the template in the next step; for now, use the known template structure from the reference), compose the filled markdown document entirely within your LLM reasoning:
+  1. Fill every `[placeholder]` in the template with corresponding data from the snippets JSON.
+  2. Preserve all headings, section order, markdown formatting, and bold markers exactly as they appear in the template.
+  3. Replace ONLY the bracketed placeholders — do not add, remove, or reorder sections.
+  4. Output the complete filled markdown in your plain-text summary.
+- **NOTE**: If the template structure is not in L2 memory, this step should be preceded by a read step. The parser should check and adjust accordingly.
+- **Criteria**: The output contains a complete markdown document following the template structure with all placeholders filled.
+- **Evaluator key_outputs** (required by Step 6): `filled_summary_md` (the complete markdown content).
+- **Evaluator data-passing responsibility**: Validate the markdown has all required sections, store full content in `key_outputs["filled_summary_md"]`.
+
+### Step 5a — Read template (Tool-bound: max 1 tool call)
+
+- **Task type**: Tool-bound I/O (read only)
+- **Tool sequence**:
+  1. `safe_cli_executor(read_file)` — read `skills\ects_skill\reference\template.md`
+- **Instruction**: Read the template file into context. **Stop immediately** and pass the template content to the Evaluator.
+- **Criteria**: Template content is loaded and non-empty.
+- **Evaluator key_outputs**: `template_content` (full template markdown).
+- **Evaluator data-passing responsibility**: Store template content in L2 memory for the composition step.
+
+### Step 6 — Write summary and format check (Tool-bound: max 3 tool calls)
+
+- **Task type**: Tool-bound I/O
+- **Tool sequence**:
+  1. `safe_cli_executor(write_md)` — write the filled markdown from L2 `filled_summary_md` to `skills\ects_skill\tmp\ai_summary.md`
+  2. `safe_py_runner` — run `scripts/format_check.py` with args `["skills/ects_skill/tmp/ai_summary.md"]`
+  3. (Only if format_check fails) `safe_cli_executor(write_md)` — re-write corrected markdown
+- **Instruction**: Retrieve `filled_summary_md` from L2 skill memory. Write it to disk with `write_md`, then run `format_check.py` to validate structure. If format_check fails, fix the markdown in your reasoning (NOT with CLI text-patching tools) and re-write. Once format_check exits 0, **stop immediately**.
+- **Criteria**: `skills\ects_skill\tmp\ai_summary.md` exists and follows the template structure. `format_check.py` exits with code 0.
+- **Evaluator key_outputs** (required by Step 7): `summary_path=skills\ects_skill\tmp\ai_summary.md`, `format_check_exit_code=0`.
+- **Evaluator data-passing responsibility**: Verify the file exists, run format_check if not already run, store path and exit code in key_outputs.
+
+### Step 7 — Verify final output (Tool-bound: max 2 tool calls + text analysis)
+
+- **Task type**: Mixed (tool reads + LLM verification)
+- **Tool sequence**:
+  1. `safe_cli_executor(read_file)` — read `skills\ects_skill\tmp\ai_summary.md`
+  2. `safe_cli_executor(read_file)` — read `skills\ects_skill\tmp\transcript.txt`
+- **Instruction**: Read both the final summary and the original transcript into context. Then, using ONLY your LLM reasoning (NO further tool calls):
+  1. Confirm the summary is non-empty and contains all expected sections (Financial Highlights, Briefing of Key Message, Key Message, Key insights from Q&A session).
+  2. Spot-check that key figures and facts in the summary actually appear in the transcript.
+  3. Flag any figures that look fabricated or cannot be found.
+  After verification, **stop immediately** and provide your findings as plain text.
+- **Criteria**: `skills\ects_skill\tmp\ai_summary.md` exists, is non-empty, and contains all expected template sections. No hallucinated figures — key numbers must be traceable to `skills\ects_skill\tmp\transcript.txt`.
 - **Evaluator key_outputs** (final step): `verification_status` (pass/fail), `flagged_issues` (comma-separated list or "none").
-- **Tools**: `safe_cli_executor` (read_file only)
+- **Evaluator data-passing responsibility**: This is the final step. Store the verification status and any flagged issues in key_outputs for the final report.

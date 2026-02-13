@@ -1,6 +1,11 @@
 # Tool Security Gateway — Parametric Whitelist Configuration
 # Each entry defines a whitelisted command template with regex-validated parameters.
 # Commands use Windows CLI (cmd.exe / PowerShell) syntax.
+#
+# DESIGN PRINCIPLE: Only expose tools for I/O operations (read/write/run).
+# Text analysis tasks (searching, extracting, counting, summarizing) are handled
+# by the LLM's native reasoning — NOT by CLI tools. This prevents the agent from
+# drifting into tool-chaining for tasks it should solve with text comprehension.
 
 cli_whitelist:
   list_files:
@@ -17,14 +22,6 @@ cli_whitelist:
       path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
-  search_text:
-    description: "Search for text patterns in files"
-    template: "findstr /S /N /R {pattern} {path}"
-    params:
-      pattern: "^[a-zA-Z0-9_.* -]+$"
-      path: "^[a-zA-Z0-9_.\\\\-]+$"
-    timeout: 30
-
   make_directory:
     description: "Create a directory (including parents)"
     template: "mkdir {path}"
@@ -37,29 +34,6 @@ cli_whitelist:
     template: "tree /F {path}"
     params:
       path: "^[a-zA-Z0-9_.\\\\-]*$"
-    timeout: 10
-
-  head_file:
-    description: "Show first N lines of a file"
-    template: "powershell -Command \"Get-Content {path} -TotalCount {lines}\""
-    params:
-      lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_.\\\\-]+$"
-    timeout: 10
-
-  tail_file:
-    description: "Show last N lines of a file"
-    template: "powershell -Command \"Get-Content {path} -Tail {lines}\""
-    params:
-      lines: "^[0-9]+$"
-      path: "^[a-zA-Z0-9_.\\\\-]+$"
-    timeout: 10
-
-  word_count:
-    description: "Count lines, words, characters in a file"
-    template: "powershell -Command \"Get-Content {path} | Measure-Object -Line -Word -Character\""
-    params:
-      path: "^[a-zA-Z0-9_.\\\\-]+$"
     timeout: 10
 
   write_json:
@@ -108,6 +82,15 @@ cli_whitelist:
     params:
       script: "^(scripts|skills)\\\\[a-zA-Z0-9_\\\\-]+(\\\\.py|\\\\[a-zA-Z0-9_\\\\-]+\\.py)$"
     timeout: 120
+
+# --- REMOVED CLI TOOLS (replaced by LLM native reasoning) ---
+# The following tools were removed because they overlap with the LLM's text
+# processing capabilities and encourage tool-chaining instead of reasoning:
+#
+# - search_text (findstr): LLM should read the full file and search within context
+# - head_file (Get-Content -TotalCount): LLM should read_file and process the beginning
+# - tail_file (Get-Content -Tail): LLM should read_file and process the end
+# - word_count (Measure-Object): LLM should read_file and count/estimate in reasoning
 
 # Blocked patterns — commands that must NEVER be executed
 blocked_patterns:
