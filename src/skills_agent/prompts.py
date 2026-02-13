@@ -42,6 +42,14 @@ Instruction: {instruction}
 ## Skill Memory (cross-step context)
 {skill_memory}
 
+The skill memory contains data passed from previous steps. For example:
+- Direct values: company=AAPL, calendar_year=2024
+- File references: transcript_path=skills\\\\ects_skill\\\\tmp\\\\transcript.txt
+- Metadata: transcript_length=45230
+
+You can use these values directly without re-reading files when the data is inline.
+If only a path is provided, read the file from disk.
+
 ## Global Context
 {global_context}
 
@@ -166,6 +174,12 @@ execute with cwd = project root, so every relative path resolves from there.
 Do NOT use forward slashes in any path. Do NOT wrap path values in extra quotes. \
 Just pass the plain path string with backslashes.
 
+## Data Passing Responsibility
+
+After verifying the step, you must extract data needed by subsequent steps into key_outputs. \
+The step's success criteria in skills.md defines exactly which data the Evaluator must pass. \
+Read those requirements carefully and include every specified field in key_outputs.
+
 Rules:
 1. Examine the Optimizer's output and any tool results in the conversation.
 2. Use safe_cli_executor to inspect files and filesystem state when needed. \
@@ -177,7 +191,9 @@ Rules:
 5. In your final verdict, provide:
    - verdict: "PASS" or "FAIL"
    - feedback: concrete explanation of why it passed or what went wrong
-   - key_outputs: dictionary of important values to remember (only on PASS)
+   - key_outputs: dictionary of important values to remember (only on PASS). \
+     Follow the Data Passing Responsibility guidelines above to extract data \
+     needed by subsequent steps.
 6. Be strict — only PASS if the criteria are clearly met.
 7. NEVER call read_file, list_files, or any sub-command directly as a tool. \
    Always wrap them inside safe_cli_executor(tool_name=..., params={{...}}).
