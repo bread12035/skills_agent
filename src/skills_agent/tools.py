@@ -92,6 +92,17 @@ def _cmd_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _ps_escape_for_single_quote(value: str) -> str:
+    """Escape a value for use inside a PowerShell single-quoted string.
+
+    In PowerShell single-quoted strings the ONLY special character is the
+    single quote itself, which must be doubled: ' → ''.
+    This is the safest quoting mechanism for arbitrary content (markdown,
+    JSON, etc.) because no other characters ($, `, \", etc.) are interpreted.
+    """
+    return value.replace("'", "''")
+
+
 def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, int]:
     """Validate parameters against whitelist and build the final command string.
 
@@ -122,7 +133,21 @@ def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, in
     # Build command — parameters are already regex-validated so we use
     # Windows CMD-compatible quoting instead of UNIX shlex.quote() which
     # wraps values in single quotes (literal characters in CMD, not quotes).
-    quoted = {k: _cmd_quote(v) for k, v in params.items()}
+    #
+    # Parameters wrapped in single quotes in the template (e.g. '{content}')
+    # are intended for PowerShell single-quoted strings.  For these we apply
+    # PS single-quote escaping (' → '') instead of CMD double-quote wrapping,
+    # which would clash with the surrounding quotes.
+    ps_single_quoted_params = {
+        m.group(1)
+        for m in re.finditer(r"'\{(\w+)\}'", template)
+    }
+    quoted = {}
+    for k, v in params.items():
+        if k in ps_single_quoted_params:
+            quoted[k] = _ps_escape_for_single_quote(v)
+        else:
+            quoted[k] = _cmd_quote(v)
     command = template.format(**quoted)
 
     # Final blocked-pattern scan on the assembled command
