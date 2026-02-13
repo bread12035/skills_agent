@@ -133,10 +133,10 @@ If a logical task requires more than 5 tool calls, it MUST be split into two or 
 
 - **Task type**: Tool-bound I/O
 - **Tool sequence**:
-  1. `safe_cli_executor(write_md)` — write the filled markdown from L2 `filled_summary_md` to `skills\ects_skill\tmp\ai_summary.md`
+  1. `safe_py_runner` — run `scripts/write_file.py` with args `["skills/ects_skill/tmp/ai_summary.md"]` and `stdin_text=<filled_summary_md>` to write the filled markdown from L2 memory to disk
   2. `safe_py_runner` — run `scripts/format_check.py` with args `["skills/ects_skill/tmp/ai_summary.md"]`
-  3. (Only if format_check fails) `safe_cli_executor(write_md)` — re-write corrected markdown
-- **Instruction**: Retrieve `filled_summary_md` from L2 skill memory. Write it to disk with `write_md`, then run `format_check.py` to validate structure. If format_check fails, fix the markdown in your reasoning (NOT with CLI text-patching tools) and re-write. Once format_check exits 0, **stop immediately**.
+  3. (Only if format_check fails) `safe_py_runner` — re-run `scripts/write_file.py` with corrected markdown via `stdin_text`
+- **Instruction**: Retrieve `filled_summary_md` from L2 skill memory. Write it to disk using `safe_py_runner` with `scripts/write_file.py` (pass the markdown content via `stdin_text` to avoid shell quoting issues), then run `format_check.py` to validate structure. If format_check fails, fix the markdown in your reasoning (NOT with CLI text-patching tools) and re-write. Once format_check exits 0, **stop immediately**.
 - **Criteria**: `skills\ects_skill\tmp\ai_summary.md` exists and follows the template structure. `format_check.py` exits with code 0.
 - **Evaluator key_outputs** (required by Step 7): `summary_path=skills\ects_skill\tmp\ai_summary.md`, `format_check_exit_code=0`.
 - **Evaluator data-passing responsibility**: Verify the file exists, run format_check if not already run, store path and exit code in key_outputs.

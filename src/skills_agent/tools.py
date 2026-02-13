@@ -221,7 +221,7 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     - tree: params={path}
     - write_json: params={path, content}
     - write_txt: params={path, content}
-    - write_md: params={path, content}
+    - write_md: params={path, content}  (NOTE: for markdown with complex formatting, prefer safe_py_runner with scripts/write_file.py + stdin_text instead)
     - copy_file: params={src, dst}
     - move_file: params={src, dst}
     - python_run: params={script}  (e.g. script="scripts\\\\format_check.py")
@@ -254,6 +254,14 @@ class SafePyInput(BaseModel):
         default_factory=dict,
         description="Environment variables to set for the script execution.",
     )
+    stdin_text: str = Field(
+        default="",
+        description=(
+            "Text to pipe into the script's stdin. Use this to pass large or "
+            "quote-sensitive content (e.g. markdown, JSON) that cannot be safely "
+            "passed as a CLI argument due to shell quoting issues."
+        ),
+    )
 
 
 @tool("safe_py_runner", args_schema=SafePyInput)
@@ -261,6 +269,7 @@ def safe_py_runner(
     script_name: str,
     args: list[str] | None = None,
     env_vars: dict[str, str] | None = None,
+    stdin_text: str = "",
 ) -> str:
     """Execute a Python script from approved directories.
 
@@ -269,6 +278,15 @@ def safe_py_runner(
       - skills\\<skill>\\   — skill-specific scripts (e.g. skills\\ects_skill\\parse_transcript.py)
 
     Arguments and env vars are validated for safety.
+
+    Use stdin_text to pass large content (markdown, JSON) to scripts that read
+    from sys.stdin — this bypasses all shell quoting issues.
+    Example:
+      safe_py_runner(
+          script_name="scripts/write_file.py",
+          args=["skills/ects_skill/tmp/ai_summary.md"],
+          stdin_text=filled_markdown_content,
+      )
     """
     import os
 
@@ -329,6 +347,7 @@ def safe_py_runner(
     try:
         result = subprocess.run(
             cmd,
+            input=stdin_text or None,
             capture_output=True,
             text=True,
             timeout=120,
