@@ -192,18 +192,19 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     Available sub-commands (pass as tool_name):
     - list_files: params={path}
     - read_file: params={path}
-    - search_text: params={pattern, path}
     - make_directory: params={path}
     - tree: params={path}
-    - head_file: params={lines, path}
-    - tail_file: params={lines, path}
-    - word_count: params={path}
     - write_json: params={path, content}
     - write_txt: params={path, content}
     - write_md: params={path, content}
     - copy_file: params={src, dst}
     - move_file: params={src, dst}
     - python_run: params={script}  (e.g. script="scripts\\\\format_check.py")
+
+    REMOVED (use LLM reasoning instead):
+    - search_text: Read the file with read_file, then search in your reasoning
+    - head_file/tail_file: Read the file with read_file, then examine the beginning/end
+    - word_count: Read the file with read_file, then count in your reasoning
     """
     if params is None:
         params = {}
