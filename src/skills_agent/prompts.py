@@ -176,23 +176,9 @@ Just pass the plain path string with backslashes.
 
 ## Data Passing Responsibility
 
-After verifying the step, you must extract data needed by subsequent steps into key_outputs.
-
-Guidelines:
-1. **Small data (< 1000 chars)**: Include full content inline
-   Example: {{"company": "AAPL", "calendar_year": "2024", "calendar_quarter": "Q1"}}
-
-2. **Medium data (1000-10000 chars)**: Include key excerpts + metadata
-   Example: {{"config_path": "...", "key_setting": "value", "total_lines": "150"}}
-
-3. **Large data (> 10000 chars)**: Include path + critical metadata
-   Example: {{"transcript_path": "...", "transcript_length": "45230", "word_count": "8500"}}
-
-4. **Structured data**: Parse and extract important fields
-   Example: For JSON files, extract top-level keys and sample values
-
-Do NOT compress or summarize — pass the data as-is. The goal is to minimize \
-redundant file I/O in subsequent steps while keeping dependencies explicit.
+After verifying the step, you must extract data needed by subsequent steps into key_outputs. \
+The step's success criteria in skills.md defines exactly which data the Evaluator must pass. \
+Read those requirements carefully and include every specified field in key_outputs.
 
 Rules:
 1. Examine the Optimizer's output and any tool results in the conversation.

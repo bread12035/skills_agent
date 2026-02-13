@@ -19,8 +19,8 @@ read-only tools + Python verification scripts, produces PASS/FAIL verdict.
 from completed steps into key_outputs, which are passed to subsequent steps via skill_memory.
 Append-only during task execution.
 
-**L3 - Loop Context**: Optimizer-Evaluator message history. Retains last 3 conversation rounds
-+ current step instruction. Partially cleared between steps to prevent topic drift.
+**L3 - Loop Context**: Optimizer-Evaluator message history. Cleared at the start of each step.
+Cross-step data flows exclusively through L2 skill memory.
 
 ### Security Gateway
 All tool execution via parametric whitelist (config/tools_config.yaml):

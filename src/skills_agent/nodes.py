@@ -185,7 +185,7 @@ def skill_parser(state: AgentState) -> dict[str, Any]:
 
 
 def prepare_step_context(state: AgentState) -> dict[str, Any]:
-    """Prepare context for the current step — retain last 3 rounds, build prompt."""
+    """Prepare context for the current step — clear L3 messages, build prompt."""
     step: StepSchema = state["steps"][state["current_step_index"]]
 
     logger.info(
@@ -205,23 +205,8 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
         tool_docs=tool_docs,
     )
 
-    # Retain last 3 conversation rounds (6 messages: 3 AI + 3 Human/Tool)
-    existing_messages = state["messages"]
-    keep_last_n = 6  # Last 3 rounds of back-and-forth
-
-    if len(existing_messages) > keep_last_n:
-        # Remove older messages, keep recent ones
-        remove_msgs = [RemoveMessage(id=m.id) for m in existing_messages[:-keep_last_n]]
-        retained_msgs = existing_messages[-keep_last_n:]
-    else:
-        remove_msgs = []
-        retained_msgs = existing_messages
-
-    logger.info(
-        "[prepare_step_context] Retained %d recent messages, removed %d old messages",
-        len(retained_msgs),
-        len(remove_msgs),
-    )
+    # Clear L3: remove all existing messages and start fresh with system context
+    remove_msgs = [RemoveMessage(id=m.id) for m in state["messages"]]
 
     output = {
         "messages": remove_msgs
@@ -239,8 +224,8 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
     }
 
     logger.info(
-        "[prepare_step_context] Node Output — injected system + human prompt for step %d",
-        step.index,
+        "[prepare_step_context] Node Output — cleared %d old messages, injected system + human prompt",
+        len(remove_msgs),
     )
     _log_memory_state("prepare_step_context/after", state)
     return output
