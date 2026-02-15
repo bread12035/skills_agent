@@ -261,6 +261,7 @@ def planner(state: AgentState) -> dict[str, Any]:
         "steps": result.steps,
         "current_step_index": 0,
         "step_retry_count": 0,
+        "current_loop_count": 0,
         "skill_memory": "",
         "last_evaluation": "",
         "plan_approved": False,
@@ -310,7 +311,8 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
         f"## Step {step.index} — Your Task\n\n"
         f"{step.optimizer_instruction}\n\n"
         f"When you have completed this task, stop making tool calls and "
-        f"respond with a plain-text summary of what you accomplished."
+        f"respond with `[ATTEMPTS_COMPLETE]` followed by a plain-text summary "
+        f"of what you accomplished."
     )
 
     # Clear L3: remove all existing messages and start fresh with system context
@@ -324,6 +326,7 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
         ],
         "step_retry_count": 0,
         "last_evaluation": "",
+        "current_loop_count": 0,
     }
 
     logger.info(
@@ -386,7 +389,11 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
 
 
 def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
-    """Wrapper around ToolNode that logs tool inputs and raw outputs."""
+    """Wrapper around ToolNode that logs tool inputs and raw outputs.
+
+    Also increments current_loop_count to track how many tool-call
+    iterations have occurred within the current step.
+    """
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         for tc in last_msg.tool_calls:
@@ -407,6 +414,11 @@ def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
                 "[tool_executor] Tool Output — %s",
                 (content[:500] if isinstance(content, str) else str(content)[:500]),
             )
+
+    # Increment loop counter
+    new_count = state.get("current_loop_count", 0) + 1
+    result["current_loop_count"] = new_count
+    logger.info("[tool_executor] current_loop_count incremented to %d", new_count)
 
     _log_memory_state("tool_executor", state)
     return result
@@ -581,17 +593,57 @@ def route_step(state: AgentState) -> str:
     return decision
 
 
-def route_optimizer_output(state: AgentState) -> str:
-    """After Optimizer: route to tool execution or evaluator.
+_STUCK_LOOP_THRESHOLD = 8
 
-    If the last message has tool_calls -> run tools.
-    Otherwise (plain text) -> evaluate.
+# Signal prefix the Optimizer must emit to trigger evaluation
+_ATTEMPTS_COMPLETE_SIGNAL = "[ATTEMPTS_COMPLETE]"
+
+
+def route_optimizer_output(state: AgentState) -> str:
+    """After Optimizer: route to tool execution, evaluator, or replan.
+
+    Priority:
+    1. Stuck-loop guard — if current_loop_count exceeds threshold, replan
+       by routing back to prepare_step_context (clears L3, preserves L2).
+    2. Tool calls present — route to tool_executor.
+    3. [ATTEMPTS_COMPLETE] signal in text — route to evaluator_agent.
+    4. Plain text without signal — treat as incomplete, route back to
+       optimizer_agent so the model can continue or finalize.
     """
+    loop_count = state.get("current_loop_count", 0)
     last_msg = state["messages"][-1]
+
+    # 1. Stuck-loop detection — replan
+    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and loop_count > _STUCK_LOOP_THRESHOLD:
+        logger.warning(
+            "[route_optimizer_output] STUCK LOOP detected (loop_count=%d > %d) → "
+            "replan via prepare_step_context",
+            loop_count,
+            _STUCK_LOOP_THRESHOLD,
+        )
+        return "prepare_step_context"
+
+    # 2. Tool calls — execute tools
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-        logger.info("[route_optimizer_output] → tool_executor (%d tool calls)", len(last_msg.tool_calls))
+        logger.info(
+            "[route_optimizer_output] → tool_executor (%d tool calls, loop_count=%d)",
+            len(last_msg.tool_calls),
+            loop_count,
+        )
         return "tool_executor"
-    logger.info("[route_optimizer_output] → evaluator_agent (text response)")
+
+    # 3. Completion signal — proceed to evaluation
+    content = last_msg.content if hasattr(last_msg, "content") and isinstance(last_msg.content, str) else ""
+    if content.strip().startswith(_ATTEMPTS_COMPLETE_SIGNAL):
+        logger.info("[route_optimizer_output] → evaluator_agent ([ATTEMPTS_COMPLETE] signal detected)")
+        return "evaluator_agent"
+
+    # 4. Fallback — plain text without signal; still route to evaluator
+    #    but log a warning so the signal gap is visible in diagnostics.
+    logger.warning(
+        "[route_optimizer_output] → evaluator_agent (text response WITHOUT "
+        "[ATTEMPTS_COMPLETE] signal — treating as implicit completion)"
+    )
     return "evaluator_agent"
 
 
