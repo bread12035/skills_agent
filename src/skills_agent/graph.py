@@ -1,11 +1,11 @@
 """LangGraph graph assembly for the Skills Agent.
 
 Constructs the Two-Layer Loop Architecture:
-    Outer Loop: Step Router → Prepare → Inner Loop → Commit → Router
-    Inner Loop: Optimizer → Tools → Evaluator → (PASS→Commit | FAIL→Optimizer)
+    Outer Loop: Step Router -> Prepare -> Inner Loop -> Commit -> Router
+    Inner Loop: Optimizer -> Tools -> Evaluator -> (PASS->Commit | FAIL->Optimizer)
 
-The skill_parser runs separately before the execution graph so that
-human approval can be requested immediately after parsing — before any
+The planner runs separately before the execution graph so that
+human approval can be requested immediately after planning — before any
 steps are executed.
 """
 
@@ -20,6 +20,7 @@ from skills_agent.nodes import (
     commit_step,
     evaluator_agent,
     optimizer_agent,
+    planner,
     prepare_step_context,
     route_evaluator_output,
     route_optimizer_output,
@@ -60,17 +61,17 @@ def human_intervention(state: AgentState) -> dict:
 
 
 def build_parser_graph() -> StateGraph:
-    """Build a minimal graph that only runs the skill_parser node.
+    """Build a minimal graph that only runs the planner node.
 
     Returns:
-        Compiled LangGraph that parses input into a SkillPlan.
+        Compiled LangGraph that plans input into a SkillPlan.
     """
     graph = StateGraph(AgentState)
-    graph.add_node("skill_parser", skill_parser)
-    graph.set_entry_point("skill_parser")
-    graph.add_edge("skill_parser", END)
+    graph.add_node("planner", planner)
+    graph.set_entry_point("planner")
+    graph.add_edge("planner", END)
     compiled = graph.compile()
-    logger.info("Parser graph compiled")
+    logger.info("Planner graph compiled")
     return compiled
 
 
@@ -78,14 +79,14 @@ def build_execution_graph() -> StateGraph:
     """Build the execution graph (post-approval).
 
     Entry point is prepare_step_context — expects state already populated
-    with parsed steps from the parser graph.
+    with parsed steps from the planner graph.
 
     Returns:
         Compiled LangGraph ready for step execution.
     """
     graph = StateGraph(AgentState)
 
-    # --- Add nodes (no skill_parser — already ran) ---
+    # --- Add nodes (no planner — already ran) ---
     graph.add_node("prepare_step_context", prepare_step_context)
     graph.add_node("optimizer_agent", optimizer_agent)
     graph.add_node("tool_executor", tool_executor)

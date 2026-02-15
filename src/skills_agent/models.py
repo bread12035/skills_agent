@@ -27,9 +27,12 @@ class StepSchema(BaseModel):
     """A single executable step within a compiled plan."""
 
     index: int = Field(description="Zero-based step index.")
-    instruction: str = Field(description="What the Optimizer should do.")
-    criteria: str = Field(
-        description="How the Evaluator verifies success (concrete, measurable)."
+    optimizer_instruction: str = Field(
+        description="Directive for the Optimizer: what actions to take to execute this step."
+    )
+    evaluator_instruction: str = Field(
+        description="Directive for the Evaluator: success criteria, verification approach, "
+        "and which key_outputs to extract for L2 memory."
     )
     tools_hint: list[str] = Field(
         default_factory=list,
@@ -39,6 +42,16 @@ class StepSchema(BaseModel):
         default_factory=list,
         description="Indices of steps this step depends on.",
     )
+
+    @property
+    def instruction(self) -> str:
+        """Backward-compatible alias for optimizer_instruction."""
+        return self.optimizer_instruction
+
+    @property
+    def criteria(self) -> str:
+        """Backward-compatible alias for evaluator_instruction."""
+        return self.evaluator_instruction
 
 
 class SkillPlan(BaseModel):

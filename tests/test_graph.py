@@ -19,8 +19,8 @@ def _make_state(**overrides) -> AgentState:
     """Create a minimal AgentState with sensible defaults."""
     base: AgentState = {
         "steps": [
-            StepSchema(index=0, instruction="Do X", criteria="X done"),
-            StepSchema(index=1, instruction="Do Y", criteria="Y done"),
+            StepSchema(index=0, optimizer_instruction="Do X", evaluator_instruction="X done"),
+            StepSchema(index=1, optimizer_instruction="Do Y", evaluator_instruction="Y done"),
         ],
         "current_step_index": 0,
         "step_retry_count": 0,
@@ -46,7 +46,7 @@ class TestRouteStep:
 
     def test_exactly_at_boundary(self):
         state = _make_state(
-            steps=[StepSchema(index=0, instruction="X", criteria="X")],
+            steps=[StepSchema(index=0, optimizer_instruction="X", evaluator_instruction="X")],
             current_step_index=1,
         )
         assert route_step(state) == "end"
