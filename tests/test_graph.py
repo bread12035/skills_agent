@@ -27,6 +27,7 @@ def _make_state(**overrides) -> AgentState:
         "max_retries": 3,
         "skill_memory": "",
         "messages": [],
+        "step_tool_call_count": 0,
         "last_evaluation": "",
         "raw_input": "test",
         "plan_approved": False,
