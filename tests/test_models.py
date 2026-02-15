@@ -14,8 +14,8 @@ class TestStepSchema:
     def test_basic_step(self):
         step = StepSchema(
             index=0,
-            instruction="List all Python files",
-            criteria="Output contains at least one .py file",
+            optimizer_instruction="List all Python files",
+            evaluator_instruction="Output contains at least one .py file",
         )
         assert step.index == 0
         assert step.tools_hint == []
@@ -24,13 +24,22 @@ class TestStepSchema:
     def test_step_with_hints(self):
         step = StepSchema(
             index=1,
-            instruction="Deploy service",
-            criteria="Service is running on port 8080",
+            optimizer_instruction="Deploy service",
+            evaluator_instruction="Service is running on port 8080",
             tools_hint=["safe_cli_executor", "safe_py_runner"],
             depends_on=[0],
         )
         assert step.tools_hint == ["safe_cli_executor", "safe_py_runner"]
         assert step.depends_on == [0]
+
+    def test_backward_compatible_properties(self):
+        step = StepSchema(
+            index=0,
+            optimizer_instruction="Do X",
+            evaluator_instruction="Verify X",
+        )
+        assert step.instruction == "Do X"
+        assert step.criteria == "Verify X"
 
 
 class TestSkillPlan:
@@ -40,13 +49,13 @@ class TestSkillPlan:
             steps=[
                 StepSchema(
                     index=0,
-                    instruction="Create project directory",
-                    criteria="Directory exists",
+                    optimizer_instruction="Create project directory",
+                    evaluator_instruction="Directory exists",
                 ),
                 StepSchema(
                     index=1,
-                    instruction="Install dependencies",
-                    criteria="pip install succeeds",
+                    optimizer_instruction="Install dependencies",
+                    evaluator_instruction="pip install succeeds",
                     depends_on=[0],
                 ),
             ],
@@ -58,7 +67,7 @@ class TestSkillPlan:
         plan = SkillPlan(
             goal="Test",
             steps=[
-                StepSchema(index=0, instruction="Do X", criteria="X is done"),
+                StepSchema(index=0, optimizer_instruction="Do X", evaluator_instruction="X is done"),
             ],
         )
         data = json.loads(plan.model_dump_json())

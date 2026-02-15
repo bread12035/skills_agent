@@ -131,7 +131,7 @@ class TestSafeCliExecutor:
 class TestSafePyRunner:
     def test_missing_script(self):
         result = safe_py_runner.invoke(
-            {"script_name": "nonexistent.py", "args": [], "env_vars": {}}
+            {"script_name": "scripts/nonexistent.py", "args": [], "env_vars": {}}
         )
         assert "[ERROR] Script not found" in result
 
@@ -184,4 +184,10 @@ class TestToolDescriptions:
         desc = get_tool_descriptions()
         assert len(desc) > 0
         assert "list_files" in desc
-        assert "safe_py_runner" in desc
+        assert "read_file" in desc
+
+    def test_write_tools_removed_from_cli_whitelist(self):
+        desc = get_tool_descriptions()
+        assert "write_json" not in desc
+        assert "write_txt" not in desc
+        assert "write_md" not in desc
