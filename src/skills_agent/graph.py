@@ -102,13 +102,14 @@ def build_execution_graph() -> StateGraph:
     # After preparing context: always go to optimizer
     graph.add_edge("prepare_step_context", "optimizer_agent")
 
-    # After optimizer: tool call or evaluation
+    # After optimizer: tool call, evaluation, or replan (stuck loop)
     graph.add_conditional_edges(
         "optimizer_agent",
         route_optimizer_output,
         {
             "tool_executor": "tool_executor",
             "evaluator_agent": "evaluator_agent",
+            "prepare_step_context": "prepare_step_context",
         },
     )
 
