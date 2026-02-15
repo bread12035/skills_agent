@@ -104,6 +104,9 @@ class AgentState(TypedDict):
     skill_memory: str
     messages: Annotated[list[BaseMessage], add_messages]
 
+    # --- L3 Anchoring ---
+    step_tool_call_count: int  # cumulative tool calls in current step (for directive anchoring)
+
     # --- Evaluator ---
     last_evaluation: str  # serialised EvaluationOutput JSON
 
