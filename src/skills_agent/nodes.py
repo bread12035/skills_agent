@@ -1,11 +1,11 @@
 """LangGraph node implementations for the Skills Agent workflow.
 
 Nodes:
-    1. skill_parser       — parse user input into a SkillPlan
+    1. planner             — context-aware planning from skill definitions
     2. prepare_step_context — prepare context for the next step
-    3. optimizer_agent     — execute the step using tools
-    4. evaluator_agent     — verify step completion
-    5. commit_step         — persist outputs and advance index
+    3. optimizer_agent      — execute the step using tools
+    4. evaluator_agent      — verify step completion
+    5. commit_step          — persist outputs and advance index
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 from dotenv import load_dotenv
 
@@ -37,12 +38,19 @@ from skills_agent.models import (
 from skills_agent.prompts import (
     EVALUATOR_SYSTEM,
     OPTIMIZER_SYSTEM,
-    SKILL_PARSER_SYSTEM,
+    PLANNER_SYSTEM,
 )
 from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, READONLY_TOOLS, get_tool_descriptions
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Project root for script discovery
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
@@ -125,46 +133,128 @@ def _to_windows_paths(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Node 0: Skill Parser
+# Script discovery helper (for Planner tool awareness)
 # ---------------------------------------------------------------------------
 
 
-def skill_parser(state: AgentState) -> dict[str, Any]:
-    """Parse raw user input into a structured SkillPlan.
+def _discover_available_scripts() -> str:
+    """Discover Python scripts available in scripts/ and skills/*/."""
+    lines: list[str] = []
 
-    Uses LLM with structured output to decompose instructions into steps.
-    After parsing, all UNIX-style paths in step instructions and criteria are
-    converted to Windows-style backslash paths so downstream agents produce
-    correct path parameters.
+    # Shared scripts
+    scripts_dir = PROJECT_ROOT / "scripts"
+    if scripts_dir.exists():
+        for py_file in sorted(scripts_dir.glob("*.py")):
+            # Read first docstring line for description
+            desc = _extract_script_description(py_file)
+            lines.append(f"  - scripts/{py_file.name}: {desc}")
+
+    # Skill-specific scripts
+    skills_dir = PROJECT_ROOT / "skills"
+    if skills_dir.exists():
+        for skill_dir in sorted(skills_dir.iterdir()):
+            if skill_dir.is_dir():
+                for py_file in sorted(skill_dir.glob("*.py")):
+                    desc = _extract_script_description(py_file)
+                    lines.append(f"  - skills/{skill_dir.name}/{py_file.name}: {desc}")
+
+    return "\n".join(lines) if lines else "  (no scripts found)"
+
+
+def _extract_script_description(py_file: Path) -> str:
+    """Extract a one-line description from a Python script's docstring."""
+    try:
+        content = py_file.read_text(encoding="utf-8")
+        # Look for module docstring
+        match = re.search(r'^"""(.+?)"""', content, re.DOTALL)
+        if match:
+            first_line = match.group(1).strip().split("\n")[0]
+            return first_line[:100]
+    except Exception:
+        pass
+    return "(no description)"
+
+
+# ---------------------------------------------------------------------------
+# Historical context extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_historical_sections(skill_content: str) -> str:
+    """Extract Success Cases, Failure Cases, and Human Feedback from skill content."""
+    sections = []
+    for section_name in ("Success Cases", "Failure Cases", "Human Feedback"):
+        pattern = rf"## {section_name}\s*\n(.*?)(?=\n## |\Z)"
+        match = re.search(pattern, skill_content, re.DOTALL)
+        if match and match.group(1).strip():
+            sections.append(f"### {section_name}\n{match.group(1).strip()}")
+
+    if sections:
+        return "\n\n".join(sections)
+    return "(no historical execution data available)"
+
+
+# ---------------------------------------------------------------------------
+# Node 0: Planner (formerly skill_parser)
+# ---------------------------------------------------------------------------
+
+
+def planner(state: AgentState) -> dict[str, Any]:
+    """Context-aware Planner: parse skill definition into a structured SkillPlan.
+
+    The Planner has access to:
+    - Tool definitions (safe_cli_executor sub-commands, safe_py_runner)
+    - Available scripts in scripts/ and skills/*/
+    - Historical execution data (Success Cases, Failure Cases, Human Feedback)
+
+    It produces steps with distinct optimizer_instruction and evaluator_instruction.
     """
-    logger.info("[skill_parser] Node Input — raw_input length: %d", len(state.get("raw_input", "")))
-    _log_memory_state("skill_parser", state)
+    logger.info("[planner] Node Input — raw_input length: %d", len(state.get("raw_input", "")))
+    _log_memory_state("planner", state)
+
+    raw_input = state["raw_input"]
+
+    # Gather context for the Planner
+    tool_docs = get_tool_descriptions()
+    available_scripts = _discover_available_scripts()
+    historical_context = _extract_historical_sections(raw_input)
+
+    # Build the planner system prompt with tool awareness
+    system_prompt = PLANNER_SYSTEM.format(
+        tool_docs=tool_docs,
+        available_scripts=available_scripts,
+    )
+
+    # Include historical context in the user message alongside the skill definition
+    user_content = raw_input
+    if historical_context != "(no historical execution data available)":
+        user_content += f"\n\n---\n## Extracted Historical Context\n{historical_context}"
 
     llm = _get_llm().with_structured_output(SkillPlan)
 
     result: SkillPlan = llm.invoke(
         [
-            SystemMessage(content=SKILL_PARSER_SYSTEM),
-            HumanMessage(content=state["raw_input"]),
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_content),
         ]
     )
 
     # Post-process: convert any remaining UNIX-style paths to Windows backslashes
     for step in result.steps:
-        step.instruction = _to_windows_paths(step.instruction)
-        step.criteria = _to_windows_paths(step.criteria)
+        step.optimizer_instruction = _to_windows_paths(step.optimizer_instruction)
+        step.evaluator_instruction = _to_windows_paths(step.evaluator_instruction)
 
     logger.info(
-        "[skill_parser] Parsed plan — goal: %s | steps: %d",
+        "[planner] Parsed plan — goal: %s | steps: %d",
         result.goal,
         len(result.steps),
     )
     for step in result.steps:
         logger.info(
-            "[skill_parser]   Step %d: %s (criteria: %s)",
+            "[planner]   Step %d: optimizer=%s | evaluator=%s",
             step.index,
-            step.instruction[:80],
-            step.criteria[:80],
+            step.optimizer_instruction[:80],
+            step.evaluator_instruction[:80],
         )
 
     output = {
@@ -175,8 +265,12 @@ def skill_parser(state: AgentState) -> dict[str, Any]:
         "last_evaluation": "",
         "plan_approved": False,
     }
-    _log_node_io("skill_parser", "Node Output", output)
+    _log_node_io("planner", "Node Output", output)
     return output
+
+
+# Backward-compatible alias
+skill_parser = planner
 
 
 # ---------------------------------------------------------------------------
@@ -185,24 +279,38 @@ def skill_parser(state: AgentState) -> dict[str, Any]:
 
 
 def prepare_step_context(state: AgentState) -> dict[str, Any]:
-    """Prepare context for the current step — clear L3 messages, build prompt."""
+    """Prepare context for the current step — clear L3 messages, build prompt.
+
+    Step-specific instructions are injected into the User Prompt (not the
+    System Prompt), following the distinct instruction model:
+    - optimizer_instruction goes into the User Prompt for the Optimizer
+    - evaluator_instruction is stored in state for later use by the Evaluator
+    """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
     logger.info(
         "[prepare_step_context] Node Input — step_index: %d | instruction: %s",
         state["current_step_index"],
-        step.instruction[:100],
+        step.optimizer_instruction[:100],
     )
     _log_memory_state("prepare_step_context", state)
 
     global_context = load_global_context()
     tool_docs = get_tool_descriptions()
 
+    # System prompt no longer contains step-specific instructions
     system_prompt = OPTIMIZER_SYSTEM.format(
-        instruction=step.instruction,
         skill_memory=format_skill_memory(state["skill_memory"]),
         global_context=global_context,
         tool_docs=tool_docs,
+    )
+
+    # Step-specific optimizer_instruction is injected into the User Prompt
+    user_content = (
+        f"## Step {step.index} — Your Task\n\n"
+        f"{step.optimizer_instruction}\n\n"
+        f"When you have completed this task, stop making tool calls and "
+        f"respond with a plain-text summary of what you accomplished."
     )
 
     # Clear L3: remove all existing messages and start fresh with system context
@@ -212,19 +320,14 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
         "messages": remove_msgs
         + [
             SystemMessage(content=system_prompt),
-            HumanMessage(
-                content=(
-                    f"Execute Step {step.index}: {step.instruction}\n\n"
-                    f"Success criteria: {step.criteria}"
-                )
-            ),
+            HumanMessage(content=user_content),
         ],
         "step_retry_count": 0,
         "last_evaluation": "",
     }
 
     logger.info(
-        "[prepare_step_context] Node Output — cleared %d old messages, injected system + human prompt",
+        "[prepare_step_context] Node Output — cleared %d old messages, injected system + user prompt",
         len(remove_msgs),
     )
     _log_memory_state("prepare_step_context/after", state)
@@ -326,28 +429,37 @@ _evaluator_tool_node = ToolNode(EVALUATOR_TOOLS)
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
 
-    The evaluator can run safe Python verification scripts (via safe_py_runner)
-    and read-only CLI commands in an internal tool loop before producing its
-    final PASS/FAIL verdict as structured EvaluationOutput.
+    The evaluator_instruction from the step is injected into the User Prompt
+    (not the System Prompt), providing verification criteria and key_outputs
+    to extract.
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
     logger.info(
-        "[evaluator_agent] Node Input — step_index: %d | criteria: %s",
+        "[evaluator_agent] Node Input — step_index: %d | evaluator_instruction: %s",
         state["current_step_index"],
-        step.criteria[:150],
+        step.evaluator_instruction[:150],
     )
     _log_memory_state("evaluator_agent", state)
 
+    # System prompt contains general evaluator behaviour (no step-specific content)
     system_prompt = EVALUATOR_SYSTEM.format(
-        instruction=step.instruction,
-        criteria=step.criteria,
         skill_memory=format_skill_memory(state["skill_memory"]),
+    )
+
+    # Build evaluator messages: system prompt + conversation history + evaluator instruction
+    evaluator_user_msg = HumanMessage(
+        content=(
+            f"## Verification Task for Step {step.index}\n\n"
+            f"{step.evaluator_instruction}\n\n"
+            f"Review the Optimizer's work above and verify according to these instructions. "
+            f"Use tools if needed to inspect files or run validation scripts."
+        )
     )
 
     # Phase 1: Tool-calling loop — let the evaluator invoke verification tools
     tool_llm = _get_llm().bind_tools(EVALUATOR_TOOLS)
-    messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
+    messages = [SystemMessage(content=system_prompt)] + list(state["messages"]) + [evaluator_user_msg]
 
     for round_num in range(_EVALUATOR_MAX_TOOL_ROUNDS):
         response: AIMessage = tool_llm.invoke(messages)
@@ -432,7 +544,7 @@ def commit_step(state: AgentState) -> dict[str, Any]:
     logger.info(
         "[commit_step] Committed step %d: %s (outputs: %s)",
         step.index,
-        step.instruction[:60],
+        step.optimizer_instruction[:60],
         list(evaluation.key_outputs.keys()),
     )
 

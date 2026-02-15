@@ -52,8 +52,9 @@ def _print_plan(state: dict) -> None:
     print("=" * 60)
     for step in steps:
         prefix = f"  Step {step.index}"
-        print(f"\n{prefix}: {step.instruction}")
-        print(f"    Criteria: {step.criteria}")
+        print(f"\n{prefix}:")
+        print(f"    Optimizer: {step.optimizer_instruction}")
+        print(f"    Evaluator: {step.evaluator_instruction}")
         if step.tools_hint:
             print(f"    Tools: {', '.join(step.tools_hint)}")
     print("\n" + "=" * 60)
@@ -67,7 +68,7 @@ def _print_step_status(state: dict) -> None:
 
     if idx < total:
         step = steps[idx]
-        print(f"\n>>> Step {idx + 1}/{total}: {step.instruction}")
+        print(f"\n>>> Step {idx + 1}/{total}: {step.optimizer_instruction}")
     else:
         print(f"\n>>> All {total} steps completed!")
 
@@ -229,7 +230,7 @@ def run(skill_content: str, md_path: Path) -> dict:
                 # The completed step is at prev_step_index
                 if prev_step_index < len(steps):
                     step = steps[prev_step_index]
-                    step_info = f"Step {step.index}: {step.instruction}"
+                    step_info = f"Step {step.index}: {step.optimizer_instruction}"
                     _save_step_evaluation(md_path, step_info, evaluation, result)
                     logger.info(
                         "Saved %s case for step %d to %s",
@@ -249,7 +250,7 @@ def run(skill_content: str, md_path: Path) -> dict:
             final_idx = result.get("current_step_index", 0) - 1
             if 0 <= final_idx < len(steps):
                 step = steps[final_idx]
-                step_info = f"Step {step.index}: {step.instruction}"
+                step_info = f"Step {step.index}: {step.optimizer_instruction}"
                 # Only save if we haven't already (check if index advanced past prev)
                 if final_idx >= prev_step_index - 1:
                     pass  # already saved in the loop above
