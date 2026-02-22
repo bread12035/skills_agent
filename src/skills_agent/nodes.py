@@ -39,11 +39,18 @@ from skills_agent.prompts import (
     EVALUATOR_SYSTEM,
     OPTIMIZER_SYSTEM,
     PLANNER_SYSTEM,
+    PRIMARY_DIRECTIVE_ANCHOR,
 )
 from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, READONLY_TOOLS, get_tool_descriptions
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# L3 anchoring configuration
+# ---------------------------------------------------------------------------
+
+_ANCHOR_EVERY_N_TOOL_CALLS = 3  # re-inject primary directive every N tool calls
 
 # ---------------------------------------------------------------------------
 # Project root for script discovery
@@ -265,6 +272,7 @@ def planner(state: AgentState) -> dict[str, Any]:
         "skill_memory": "",
         "last_evaluation": "",
         "plan_approved": False,
+        "step_tool_call_count": 0,
     }
     _log_node_io("planner", "Node Output", output)
     return output
@@ -282,10 +290,12 @@ skill_parser = planner
 def prepare_step_context(state: AgentState) -> dict[str, Any]:
     """Prepare context for the current step — clear L3 messages, build prompt.
 
-    Step-specific instructions are injected into the User Prompt (not the
-    System Prompt), following the distinct instruction model:
-    - optimizer_instruction goes into the User Prompt for the Optimizer
-    - evaluator_instruction is stored in state for later use by the Evaluator
+    L2 skill memory is injected into the **User Prompt** (wrapped in
+    ``<skill_memory>`` XML tags) so that the model can clearly distinguish
+    global behaviour rules (System) from step-specific context data (User).
+
+    Step-specific instructions are also placed in the User Prompt using
+    ``<instruction>`` XML tags.
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
@@ -299,15 +309,17 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
     global_context = load_global_context()
     tool_docs = get_tool_descriptions()
 
-    # System prompt no longer contains step-specific instructions
+    # System prompt: global behaviour + tool docs (NO skill_memory here)
     system_prompt = OPTIMIZER_SYSTEM.format(
-        skill_memory=format_skill_memory(state["skill_memory"]),
         global_context=global_context,
         tool_docs=tool_docs,
     )
 
-    # Step-specific optimizer_instruction is injected into the User Prompt
+    # User prompt: <skill_memory> at the top, then <instruction>
+    skill_memory_block = format_skill_memory(state["skill_memory"])
     user_content = (
+        f"<skill_memory>\n{skill_memory_block}\n</skill_memory>\n\n"
+        f"<instruction>\n"
         f"## Step {step.index} — Your Task\n\n"
         f"{step.optimizer_instruction}\n\n"
         f"When you have completed this task, stop making tool calls and "
@@ -325,12 +337,13 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
             HumanMessage(content=user_content),
         ],
         "step_retry_count": 0,
+        "step_tool_call_count": 0,  # reset tool call counter for new step
         "last_evaluation": "",
         "current_loop_count": 0,
     }
 
     logger.info(
-        "[prepare_step_context] Node Output — cleared %d old messages, injected system + user prompt",
+        "[prepare_step_context] Node Output — cleared %d old messages, injected system + user prompt (L2 in user prompt)",
         len(remove_msgs),
     )
     _log_memory_state("prepare_step_context/after", state)
@@ -380,7 +393,13 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
             (response.content[:200] if isinstance(response.content, str) else "(non-text)"),
         )
 
-    return {"messages": [response]}
+    # Update cumulative tool call count for L3 anchoring
+    new_tool_call_count = state.get("step_tool_call_count", 0) + tool_call_count
+
+    return {
+        "messages": [response],
+        "step_tool_call_count": new_tool_call_count,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -441,9 +460,9 @@ _evaluator_tool_node = ToolNode(EVALUATOR_TOOLS)
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
 
-    The evaluator_instruction from the step is injected into the User Prompt
-    (not the System Prompt), providing verification criteria and key_outputs
-    to extract.
+    L2 skill memory is injected into the **User Prompt** (wrapped in
+    ``<skill_memory>`` XML tags), and the evaluator_instruction is placed
+    inside ``<success_criteria>`` tags.
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
@@ -454,18 +473,20 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     )
     _log_memory_state("evaluator_agent", state)
 
-    # System prompt contains general evaluator behaviour (no step-specific content)
-    system_prompt = EVALUATOR_SYSTEM.format(
-        skill_memory=format_skill_memory(state["skill_memory"]),
-    )
+    # System prompt: general evaluator behaviour (NO skill_memory)
+    system_prompt = EVALUATOR_SYSTEM
 
-    # Build evaluator messages: system prompt + conversation history + evaluator instruction
+    # Build evaluator user message with <skill_memory> and <success_criteria>
+    skill_memory_block = format_skill_memory(state["skill_memory"])
     evaluator_user_msg = HumanMessage(
         content=(
+            f"<skill_memory>\n{skill_memory_block}\n</skill_memory>\n\n"
+            f"<success_criteria>\n"
             f"## Verification Task for Step {step.index}\n\n"
             f"{step.evaluator_instruction}\n\n"
             f"Review the Optimizer's work above and verify according to these instructions. "
-            f"Use tools if needed to inspect files or run validation scripts."
+            f"Use tools if needed to inspect files or run validation scripts.\n"
+            f"</success_criteria>"
         )
     )
 
@@ -473,6 +494,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     tool_llm = _get_llm().bind_tools(EVALUATOR_TOOLS)
     messages = [SystemMessage(content=system_prompt)] + list(state["messages"]) + [evaluator_user_msg]
 
+    eval_tool_call_count = 0
     for round_num in range(_EVALUATOR_MAX_TOOL_ROUNDS):
         response: AIMessage = tool_llm.invoke(messages)
         messages.append(response)
@@ -480,6 +502,8 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         if not (hasattr(response, "tool_calls") and response.tool_calls):
             logger.info("[evaluator_agent] No more tool calls after round %d", round_num + 1)
             break  # No tool calls — evaluator is ready to give verdict
+
+        eval_tool_call_count += len(response.tool_calls)
 
         for tc in response.tool_calls:
             logger.info(
@@ -498,6 +522,17 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
                 (content[:500] if isinstance(content, str) else str(content)[:500]),
             )
         messages.extend(tool_result["messages"])
+
+        # L3 Anchoring for evaluator: inject <primary_directive> every N tool calls
+        if eval_tool_call_count > 0 and eval_tool_call_count % _ANCHOR_EVERY_N_TOOL_CALLS == 0:
+            anchor_content = PRIMARY_DIRECTIVE_ANCHOR.format(
+                instruction=step.evaluator_instruction,
+            )
+            messages.append(HumanMessage(content=anchor_content))
+            logger.info(
+                "[evaluator_agent] L3 Anchor injected at eval_tool_call_count=%d",
+                eval_tool_call_count,
+            )
 
     # Phase 2: Structured verdict — ask the LLM for its final evaluation
     verdict_llm = _get_llm().with_structured_output(EvaluationOutput)
