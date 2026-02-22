@@ -98,6 +98,7 @@ class AgentState(TypedDict):
     current_step_index: int
     step_retry_count: int
     max_retries: int
+    current_loop_count: int  # tool-call iterations within a step; reset per step
 
     # --- Context & Memory ---
     skill_memory: str

@@ -147,8 +147,11 @@ All file writing MUST be done through Python scripts via safe_py_runner:
 2. If a previous attempt failed, the Evaluator's feedback is in the conversation — \
    use it to fix your approach.
 3. Be precise and methodical. Execute one tool call at a time.
-4. When you believe the step is complete, STOP making tool calls and respond with \
-   a plain-text summary of what you accomplished.
+4. **Completion Signal — CRITICAL:** When you have satisfied the step criteria and \
+   are done making tool calls, you MUST begin your final text response with the \
+   exact prefix `[ATTEMPTS_COMPLETE]` followed by a plain-text summary of what you \
+   accomplished. This prefix is the ONLY way to trigger the evaluation phase. \
+   A response without this prefix will NOT be forwarded to the Evaluator.
 5. Do NOT continue making tool calls after the task is done.
 6. NEVER call read_file, list_files, or any sub-command directly as a tool. \
    Always wrap them inside safe_cli_executor(tool_name=..., params={{...}}).
