@@ -237,13 +237,6 @@ def planner(state: AgentState) -> dict[str, Any]:
     if historical_context != "(no historical execution data available)":
         user_content += f"\n\n---\n## Extracted Historical Context\n{historical_context}"
 
-    # Append available tools so the LLM sees them at the end of context when
-    # generating tools_hint values (recency bias).
-    user_content += (
-        f"\n\n---\n"
-        "## Available Tools (for tools_hint generation)\n\n"
-        f"{tool_docs}"
-    )
 
     llm = _get_llm().with_structured_output(SkillPlan)
 
