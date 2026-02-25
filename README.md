@@ -10,6 +10,9 @@ A context-aware Planner decomposes a skill definition into steps, then an inner 
 ```bash
 # Clone the repo and install in editable mode
 git clone <repo-url> && cd skills_agent
+# Create venv and activate
+python -m venv skills-agent
+.\skills-agent\Scripts\Activate.ps1
 pip install -e .
 ```
 
