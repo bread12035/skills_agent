@@ -224,7 +224,7 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     - write_md: params={path, content}  (NOTE: for markdown with complex formatting, prefer safe_py_runner with scripts/write_file.py + stdin_text instead)
     - copy_file: params={src, dst}
     - move_file: params={src, dst}
-    - python_run: params={script}  (e.g. script="scripts\\\\format_check.py")
+    - python_run: params={script}  (e.g. script="scripts\\\\parse_transcript.py")
 
     REMOVED (use LLM reasoning instead):
     - search_text: Read the file with read_file, then search in your reasoning
@@ -319,7 +319,8 @@ def safe_py_runner(
         return "[SECURITY BLOCKED] Only .py files are allowed."
 
     # Validate args — no shell metacharacters (before checking file existence)
-    arg_pattern = re.compile(r"^[a-zA-Z0-9_./:@=-]+$")
+    # Includes \\ to allow Windows-style backslash paths (e.g. skills\\ects_skill\\tmp\\file.txt)
+    arg_pattern = re.compile(r"^[a-zA-Z0-9_./:@=\\-]+$")
     for arg in args:
         if not arg_pattern.match(arg):
             return f"[SECURITY BLOCKED] Argument contains forbidden characters: {arg!r}"
