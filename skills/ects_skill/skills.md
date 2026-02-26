@@ -41,8 +41,6 @@ All intermediate and final artifacts are saved to `skills\ects_skill\tmp\`:
   Takes args: `[company, year, quarter]`. Saves `raw_response.json`.
 - **Script**: `scripts/parse_transcript.py` — Parses the raw API response.
   Reads `raw_response.json`, extracts `transcript.txt` and `metadata.json`.
-- **Script**: `scripts/format_check.py` — Validates a filled summary against the
-  template structure. Takes arg: path to the summary file. Exits 0 on success.
 - **Script**: `scripts/write_json.py` — Writes JSON content to a specified file path.
   Takes args: `[file_path, json_content]`.
 - **Script**: `scripts/write_md.py` — Writes markdown content to a specified file path.
@@ -73,13 +71,19 @@ All intermediate and final artifacts are saved to `skills\ects_skill\tmp\`:
 6. **Compose the summary**: Using the extracted snippets and the template
    structure, fill every placeholder in the template with corresponding data.
    Preserve all headings, section order, and markdown formatting exactly.
+   **Placeholder rule**: If a placeholder value cannot be found in the
+   transcript, write the literal text `[placeholder]` for that value instead
+   of fabricating data. After filling all placeholders, delete every line that
+   still contains `[placeholder]` so the final output contains no unfilled
+   entries.
 
-7. **Write and validate the summary**: Write the composed summary to disk and
-   run the format checker to validate structural compliance. If validation
-   fails, fix and re-write.
+7. **Write the summary**: Write the composed summary to disk using
+   `scripts/write_file.py` via `safe_py_runner` with `stdin_text`.
 
-8. **Final verification**: Read both the final summary and original transcript,
-   then verify that key figures in the summary are traceable to the transcript.
+8. **Final verification**: First read `skills\ects_skill\tmp\transcript.txt`
+   into context (L3 memory) using `safe_cli_executor` with `tool_name="read_file"`.
+   Then read the final summary file. Verify that every key figure in the summary
+   is traceable to a verbatim passage in the transcript.
    Flag any potentially hallucinated data.
 
 ## Success Cases

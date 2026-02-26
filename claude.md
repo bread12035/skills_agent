@@ -37,4 +37,4 @@ Python scripts (safe_py_runner): Forward slashes or backslashes accepted.
 Examples:
 - ✓ skills\\ects_skill\\tmp\\output.json
 - ✗ skills/ects_skill/tmp/output.json (CLI tool would fail)
-- ✓ scripts/format_check.py (Python script path)
+- ✓ scripts/write_md.py (Python script path)
