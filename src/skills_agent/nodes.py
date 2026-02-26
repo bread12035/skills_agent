@@ -110,6 +110,7 @@ def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
         kwargs.setdefault("openai_api_base", base_url)
     if api_key:
         kwargs.setdefault("openai_api_key", api_key)
+    kwargs.setdefault("temperature", 0)
     return ChatOpenAI(model=model, **kwargs)
 
 
@@ -362,37 +363,20 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
     The Optimizer has access to all tools (safe_cli_executor, safe_py_runner).
     It will either make tool calls or return a text summary when done.
     """
-    logger.info(
-        "[optimizer_agent] Node Input — messages: %d | step_index: %d",
-        len(state["messages"]),
-        state.get("current_step_index", 0),
-    )
-    _log_memory_state("optimizer_agent", state)
-
     llm = _get_llm().bind_tools(ALL_TOOLS)
     response: AIMessage = llm.invoke(state["messages"])
 
     tool_call_count = len(response.tool_calls) if response.tool_calls else 0
-    text_len = len(response.content) if isinstance(response.content, str) else 0
 
-    logger.info(
-        "[optimizer_agent] Agent Response — tool_calls: %d | text_len: %d",
-        tool_call_count,
-        text_len,
-    )
-
-    if response.tool_calls:
-        for tc in response.tool_calls:
-            logger.info(
-                "[optimizer_agent]   Tool Call — name: %s | args: %s",
-                tc.get("name", "unknown"),
-                json.dumps(tc.get("args", {}))[:300],
+    if not response.tool_calls:
+        # Log the optimizer's completion text (ATTEMPTS_COMPLETE summary or text output)
+        text = response.content if isinstance(response.content, str) else "(non-text)"
+        if text.strip().startswith(_ATTEMPTS_COMPLETE_SIGNAL):
+            logger.info("[optimizer_agent] Completed:\n%s", text)
+        else:
+            logger.warning(
+                "[optimizer_agent] Text output (missing [ATTEMPTS_COMPLETE]):\n%s", text
             )
-    else:
-        logger.info(
-            "[optimizer_agent]   Text Response: %s",
-            (response.content[:200] if isinstance(response.content, str) else "(non-text)"),
-        )
 
     # Update cumulative tool call count for L3 anchoring
     new_tool_call_count = state.get("step_tool_call_count", 0) + tool_call_count
@@ -418,29 +402,26 @@ def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         for tc in last_msg.tool_calls:
             logger.info(
-                "[tool_executor] Tool Input — name: %s | args: %s",
+                "[tool_executor] Tool Call — %s | args: %s",
                 tc.get("name", "unknown"),
-                json.dumps(tc.get("args", {}))[:500],
+                json.dumps(tc.get("args", {})),
             )
 
     _tool_node = ToolNode(ALL_TOOLS)
     result = _tool_node.invoke(state)
 
-    # Log tool outputs
+    # Log tool outputs (full content for supervisory clarity)
     if "messages" in result:
         for msg in result["messages"]:
             content = msg.content if hasattr(msg, "content") else str(msg)
             logger.info(
-                "[tool_executor] Tool Output — %s",
-                (content[:500] if isinstance(content, str) else str(content)[:500]),
+                "[tool_executor] Tool Result — %s",
+                content if isinstance(content, str) else str(content),
             )
 
     # Increment loop counter
     new_count = state.get("current_loop_count", 0) + 1
     result["current_loop_count"] = new_count
-    logger.info("[tool_executor] current_loop_count incremented to %d", new_count)
-
-    _log_memory_state("tool_executor", state)
     return result
 
 
@@ -466,13 +447,6 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     inside ``<success_criteria>`` tags.
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
-
-    logger.info(
-        "[evaluator_agent] Node Input — step_index: %d | evaluator_instruction: %s",
-        state["current_step_index"],
-        step.evaluator_instruction[:150],
-    )
-    _log_memory_state("evaluator_agent", state)
 
     # System prompt: general evaluator behaviour (NO skill_memory)
     system_prompt = EVALUATOR_SYSTEM
@@ -501,26 +475,23 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         messages.append(response)
 
         if not (hasattr(response, "tool_calls") and response.tool_calls):
-            logger.info("[evaluator_agent] No more tool calls after round %d", round_num + 1)
             break  # No tool calls — evaluator is ready to give verdict
 
         eval_tool_call_count += len(response.tool_calls)
 
         for tc in response.tool_calls:
             logger.info(
-                "[evaluator_agent] Tool Call (round %d) — name: %s | args: %s",
-                round_num + 1,
+                "[evaluator_agent] Verification Call — %s | args: %s",
                 tc.get("name", "unknown"),
-                json.dumps(tc.get("args", {}))[:300],
+                json.dumps(tc.get("args", {})),
             )
 
         tool_result = _evaluator_tool_node.invoke({"messages": messages})
         for msg in tool_result["messages"]:
             content = msg.content if hasattr(msg, "content") else str(msg)
             logger.info(
-                "[evaluator_agent] Tool Output (round %d) — %s",
-                round_num + 1,
-                (content[:500] if isinstance(content, str) else str(content)[:500]),
+                "[evaluator_agent] Verification Result — %s",
+                content if isinstance(content, str) else str(content),
             )
         messages.extend(tool_result["messages"])
 
@@ -530,24 +501,21 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
                 instruction=step.evaluator_instruction,
             )
             messages.append(HumanMessage(content=anchor_content))
-            logger.info(
-                "[evaluator_agent] L3 Anchor injected at eval_tool_call_count=%d",
-                eval_tool_call_count,
-            )
 
     # Phase 2: Structured verdict — ask the LLM for its final evaluation
     verdict_llm = _get_llm().with_structured_output(EvaluationOutput)
     evaluation: EvaluationOutput = verdict_llm.invoke(messages)
 
+    # Log verdict, feedback, and key outputs for supervisory clarity
     logger.info(
-        "[evaluator_agent] Verdict: %s — feedback: %s",
+        "[evaluator_agent] Verdict: %s | Feedback: %s",
         evaluation.verdict.value,
-        evaluation.feedback[:200],
+        evaluation.feedback,
     )
     if evaluation.key_outputs:
         logger.info(
             "[evaluator_agent] Key Outputs: %s",
-            json.dumps(evaluation.key_outputs)[:300],
+            json.dumps(evaluation.key_outputs),
         )
 
     # Inject feedback into message stream for the Optimizer to see on retry
@@ -558,14 +526,11 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         )
     )
 
-    output = {
+    return {
         "messages": [feedback_msg],
         "last_evaluation": evaluation.model_dump_json(),
         "step_retry_count": state["step_retry_count"] + 1,
     }
-    _log_node_io("evaluator_agent", "Node Output", output)
-    _log_memory_state("evaluator_agent/after", state)
-    return output
 
 
 # ---------------------------------------------------------------------------

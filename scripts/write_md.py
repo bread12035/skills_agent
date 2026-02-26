@@ -8,6 +8,7 @@ Arguments:
     md_content — Markdown string to write.
 
 Creates parent directories if needed and writes with UTF-8 encoding.
+Handles UnicodeEncodeError gracefully by replacing unencodable characters.
 """
 
 import sys
@@ -28,8 +29,22 @@ def main() -> None:
     dest = PROJECT_ROOT / file_path.replace("\\", "/")
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    dest.write_text(md_content, encoding="utf-8")
-    print(f"Markdown written to {dest.relative_to(PROJECT_ROOT)}")
+    try:
+        dest.write_text(md_content, encoding="utf-8")
+    except UnicodeEncodeError:
+        # Fallback: encode with replacement for surrogate or unencodable characters
+        safe_bytes = md_content.encode("utf-8", errors="replace")
+        dest.write_bytes(safe_bytes)
+        print(
+            "Warning: some characters were replaced due to UnicodeEncodeError",
+            file=sys.stderr,
+        )
+
+    try:
+        print(f"Markdown written to {dest.relative_to(PROJECT_ROOT)}")
+    except UnicodeEncodeError:
+        rel = str(dest.relative_to(PROJECT_ROOT)).encode("ascii", errors="replace").decode("ascii")
+        print(f"Markdown written to {rel}")
 
 
 if __name__ == "__main__":
