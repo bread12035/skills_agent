@@ -10,7 +10,6 @@ Protection layers:
 from __future__ import annotations
 
 import re
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -344,7 +343,14 @@ def safe_py_runner(
     for key in ("TRANSCRIPT_API_URL", "TRANSCRIPT_API_TOKEN"):
         if key in os.environ and key not in env_vars:
             env[key] = os.environ[key]
-    cmd = ["python", str(script_path)] + [shlex.quote(a) for a in args]
+
+    # Normalise Windows-style backslash paths to forward slashes.
+    # subprocess.run with a list (shell=False) passes each item verbatim to the
+    # process — no shell quoting needed.  shlex.quote() must NOT be used here
+    # because it wraps backslash-containing strings in literal single-quote
+    # characters, which the receiving script sees as part of the argument value.
+    normalised_args = [a.replace("\\", "/") for a in args]
+    cmd = ["python", str(script_path)] + normalised_args
     try:
         result = subprocess.run(
             cmd,
