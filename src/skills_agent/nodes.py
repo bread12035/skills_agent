@@ -238,6 +238,7 @@ def planner(state: AgentState) -> dict[str, Any]:
     if historical_context != "(no historical execution data available)":
         user_content += f"\n\n---\n## Extracted Historical Context\n{historical_context}"
 
+
     llm = _get_llm().with_structured_output(SkillPlan)
 
     result: SkillPlan = llm.invoke(
