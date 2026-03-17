@@ -76,6 +76,22 @@ cli_whitelist:
 # - tail_file (Get-Content -Tail): LLM should read_file and process the end
 # - word_count (Measure-Object): LLM should read_file and count/estimate in reasoning
 
+# --- Web Search & AI Skills (executed via safe_py_runner) ---
+# These scripts call external AI APIs (Anthropic, Gemini) and are
+# registered here for documentation and planning purposes.
+# They are executed via safe_py_runner (scripts/ directory).
+#
+# Web Search:
+#   - scripts/web_search.py         — Claude-powered web search. args=[query]
+#   - scripts/gemini_search.py      — Gemini Google Search. args=[query]
+#
+# Anthropic Native Skills (container-based, require ANTHROPIC_API_KEY):
+#   - scripts/claude_pdf.py         — Generate PDF. args=[output_path], stdin_text=prompt
+#   - scripts/claude_docx.py        — Generate DOCX. args=[output_path], stdin_text=prompt
+#   - scripts/claude_pptx.py        — Generate PPTX. args=[output_path], stdin_text=prompt
+#   - scripts/claude_xlsx.py        — Generate XLSX. args=[output_path], stdin_text=prompt
+#   - scripts/claude_frontend_design.py — Generate HTML/CSS/JS. args=[output_path], stdin_text=prompt
+
 # Blocked patterns — commands that must NEVER be executed
 blocked_patterns:
   - "rm\\s+-rf"

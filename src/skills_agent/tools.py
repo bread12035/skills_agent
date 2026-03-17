@@ -212,6 +212,17 @@ def safe_py_runner(
       - scripts/write_txt.py  — write text: args=[file_path, text_content]
       - scripts/write_md.py   — write markdown: args=[file_path, md_content]
 
+    Web search scripts:
+      - scripts/web_search.py     — Claude-powered web search: args=[query]
+      - scripts/gemini_search.py  — Gemini Google Search: args=[query]
+
+    Anthropic native skills (container-based document generation):
+      - scripts/claude_pdf.py              — generate PDF: args=[output_path], stdin_text=prompt
+      - scripts/claude_docx.py             — generate DOCX: args=[output_path], stdin_text=prompt
+      - scripts/claude_pptx.py             — generate PPTX: args=[output_path], stdin_text=prompt
+      - scripts/claude_xlsx.py             — generate XLSX: args=[output_path], stdin_text=prompt
+      - scripts/claude_frontend_design.py  — generate HTML/CSS/JS: args=[output_path], stdin_text=prompt
+
     Example:
       safe_py_runner(
           script_name="scripts/write_file.py",
@@ -271,7 +282,12 @@ def safe_py_runner(
 
     # Execute — inherit TRANSCRIPT_API_* env vars for ects_skill scripts
     env = {**os.environ, **env_vars}
-    for key in ("TRANSCRIPT_API_URL", "TRANSCRIPT_API_TOKEN"):
+    for key in (
+        "TRANSCRIPT_API_URL",
+        "TRANSCRIPT_API_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+    ):
         if key in os.environ and key not in env_vars:
             env[key] = os.environ[key]
 
@@ -363,6 +379,17 @@ def get_tool_descriptions_for_hint(tools_hint: list[str]) -> str:
         lines.append("  - scripts/write_txt.py  — Write text file. args=[file_path, text_content]")
         lines.append("  - scripts/write_md.py   — Write markdown file. args=[file_path, md_content]")
         lines.append("")
+        lines.append("Web search scripts:")
+        lines.append("  - scripts/web_search.py     — Claude-powered web search. args=[query]")
+        lines.append("  - scripts/gemini_search.py  — Gemini Google Search. args=[query]")
+        lines.append("")
+        lines.append("Anthropic native skills (container-based document generation):")
+        lines.append("  - scripts/claude_pdf.py              — Generate PDF. args=[output_path], stdin_text=prompt")
+        lines.append("  - scripts/claude_docx.py             — Generate DOCX. args=[output_path], stdin_text=prompt")
+        lines.append("  - scripts/claude_pptx.py             — Generate PPTX. args=[output_path], stdin_text=prompt")
+        lines.append("  - scripts/claude_xlsx.py             — Generate XLSX. args=[output_path], stdin_text=prompt")
+        lines.append("  - scripts/claude_frontend_design.py  — Generate HTML/CSS/JS. args=[output_path], stdin_text=prompt")
+        lines.append("")
 
     if "safe_cli_executor" in tools_hint:
         lines.append("## Legacy Tool: safe_cli_executor")
@@ -393,6 +420,17 @@ def get_tool_descriptions() -> str:
     lines.append("  - scripts/write_json.py — Write JSON file. args=[file_path, json_content]")
     lines.append("  - scripts/write_txt.py  — Write text file. args=[file_path, text_content]")
     lines.append("  - scripts/write_md.py   — Write markdown file. args=[file_path, md_content]")
+    lines.append("")
+    lines.append("Web search scripts:")
+    lines.append("  - scripts/web_search.py     — Claude-powered web search. args=[query]")
+    lines.append("  - scripts/gemini_search.py  — Gemini Google Search. args=[query]")
+    lines.append("")
+    lines.append("Anthropic native skills (container-based document generation):")
+    lines.append("  - scripts/claude_pdf.py              — Generate PDF. args=[output_path], stdin_text=prompt")
+    lines.append("  - scripts/claude_docx.py             — Generate DOCX. args=[output_path], stdin_text=prompt")
+    lines.append("  - scripts/claude_pptx.py             — Generate PPTX. args=[output_path], stdin_text=prompt")
+    lines.append("  - scripts/claude_xlsx.py             — Generate XLSX. args=[output_path], stdin_text=prompt")
+    lines.append("  - scripts/claude_frontend_design.py  — Generate HTML/CSS/JS. args=[output_path], stdin_text=prompt")
     lines.append("")
     lines.append("## Legacy Tool: safe_cli_executor")
     lines.append("Retains only the python_run sub-command:")
