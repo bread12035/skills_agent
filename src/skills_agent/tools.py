@@ -305,6 +305,80 @@ ALL_TOOLS = [safe_cli_executor, safe_py_runner]
 READONLY_TOOLS = [safe_cli_executor]  # Read-only inspection
 EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner]  # Evaluator: read + py verification
 
+# Mapping from tool hint names to actual tool objects for dynamic filtering
+_TOOL_NAME_MAP = {
+    "safe_cli_executor": safe_cli_executor,
+    "safe_py_runner": safe_py_runner,
+}
+
+
+def filter_tools_by_hint(tools_hint: list[str]) -> list:
+    """Filter the tool registry to include only hinted tools.
+
+    If tools_hint is empty, returns ALL_TOOLS (no filtering).
+
+    Args:
+        tools_hint: List of tool names suggested by the Planner.
+
+    Returns:
+        List of LangChain tool objects matching the hints.
+    """
+    if not tools_hint:
+        return list(ALL_TOOLS)
+
+    filtered = []
+    for hint in tools_hint:
+        tool = _TOOL_NAME_MAP.get(hint)
+        if tool and tool not in filtered:
+            filtered.append(tool)
+
+    # Fallback: if no valid hints matched, return all tools
+    return filtered if filtered else list(ALL_TOOLS)
+
+
+def get_tool_descriptions_for_hint(tools_hint: list[str]) -> str:
+    """Return tool documentation filtered by tools_hint.
+
+    If tools_hint is empty, returns full documentation.
+
+    Args:
+        tools_hint: List of tool names to document.
+
+    Returns:
+        Human-readable tool documentation string.
+    """
+    if not tools_hint:
+        return get_tool_descriptions()
+
+    lines: list[str] = []
+
+    if "safe_py_runner" in tools_hint:
+        lines.append("## Primary Tool: safe_py_runner")
+        lines.append("All I/O operations use Python scripts executed via safe_py_runner.")
+        lines.append("Available scripts (pass as script_name):")
+        lines.append("  - scripts/read.py       — Read file content. args=[file_path]")
+        lines.append("  - scripts/list.py       — List directory contents. args=[dir_path]")
+        lines.append("  - scripts/write_file.py — Write content from stdin. args=[file_path], stdin_text=content")
+        lines.append("  - scripts/write_json.py — Write JSON file. args=[file_path, json_content]")
+        lines.append("  - scripts/write_txt.py  — Write text file. args=[file_path, text_content]")
+        lines.append("  - scripts/write_md.py   — Write markdown file. args=[file_path, md_content]")
+        lines.append("")
+
+    if "safe_cli_executor" in tools_hint:
+        lines.append("## Legacy Tool: safe_cli_executor")
+        lines.append("Retains only the python_run sub-command:")
+        whitelist = _CONFIG.get("cli_whitelist", {})
+        for name, spec in whitelist.items():
+            desc = spec.get("description", "")
+            params = spec.get("params", {})
+            lines.append(
+                f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
+            )
+        lines.append("")
+
+    lines.append("IMPORTANT: All path values MUST use forward slashes (/) and be relative to the PROJECT ROOT.")
+    return "\n".join(lines)
+
 
 def get_tool_descriptions() -> str:
     """Return human-readable tool documentation for prompt injection."""

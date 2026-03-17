@@ -26,7 +26,7 @@ from skills_agent.memory import (
     append_skill_memory,
     clear_loop_messages,
     format_skill_memory,
-    load_global_context,
+    load_role_context,
 )
 from skills_agent.models import (
     AgentState,
@@ -41,7 +41,14 @@ from skills_agent.prompts import (
     PLANNER_SYSTEM,
     PRIMARY_DIRECTIVE_ANCHOR,
 )
-from skills_agent.tools import ALL_TOOLS, EVALUATOR_TOOLS, READONLY_TOOLS, get_tool_descriptions
+from skills_agent.tools import (
+    ALL_TOOLS,
+    EVALUATOR_TOOLS,
+    READONLY_TOOLS,
+    filter_tools_by_hint,
+    get_tool_descriptions,
+    get_tool_descriptions_for_hint,
+)
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -97,13 +104,15 @@ def _log_node_io(node_name: str, direction: str, data: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# LLM instances
+# Decoupled LLM Factory — Model Specialization
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MODEL = "gpt-oss"
+_THINKING_MODEL = os.environ.get("THINKING_MODEL", "gpt-oss")
+_DENSE_MODEL = os.environ.get("DENSE_MODEL", "gpt-oss")
 
 
-def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
+def _get_llm_base(model: str, **kwargs: Any) -> ChatOpenAI:
+    """Base LLM constructor shared by all factories."""
     base_url = os.environ.get("OPENAI_API_BASE")
     api_key = os.environ.get("OPENAI_API_KEY")
     if base_url:
@@ -112,6 +121,26 @@ def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
         kwargs.setdefault("openai_api_key", api_key)
     kwargs.setdefault("temperature", 0)
     return ChatOpenAI(model=model, **kwargs)
+
+
+def get_planner_llm(**kwargs: Any) -> ChatOpenAI:
+    """LLM for the Planner — uses thinking models for high-level reasoning."""
+    return _get_llm_base(_THINKING_MODEL, **kwargs)
+
+
+def get_optimizer_llm(**kwargs: Any) -> ChatOpenAI:
+    """LLM for the Optimizer — uses dense models for fast tool calling."""
+    return _get_llm_base(_DENSE_MODEL, **kwargs)
+
+
+def get_evaluator_llm(**kwargs: Any) -> ChatOpenAI:
+    """LLM for the Evaluator — uses thinking models for strict verification."""
+    return _get_llm_base(_THINKING_MODEL, **kwargs)
+
+
+# Backward-compatible alias
+def _get_llm(model: str | None = None, **kwargs: Any) -> ChatOpenAI:
+    return _get_llm_base(model or _DENSE_MODEL, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +249,7 @@ def planner(state: AgentState) -> dict[str, Any]:
     """Context-aware Planner: parse skill definition into a structured SkillPlan.
 
     The Planner has access to:
+    - Role-specific context from config/planner.md
     - Tool definitions (safe_py_runner scripts, safe_cli_executor sub-commands)
     - Available scripts in scripts/ and skills/*/
     - Historical execution data (Success Cases, Failure Cases, Human Feedback)
@@ -232,12 +262,14 @@ def planner(state: AgentState) -> dict[str, Any]:
     raw_input = state["raw_input"]
 
     # Gather context for the Planner
+    role_context = load_role_context("planner")
     tool_docs = get_tool_descriptions()
     available_scripts = _discover_available_scripts()
     historical_context = _extract_historical_sections(raw_input)
 
-    # Build the planner system prompt with tool awareness
+    # Build the planner system prompt with role context and tool awareness
     system_prompt = PLANNER_SYSTEM.format(
+        role_context=role_context,
         tool_docs=tool_docs,
         available_scripts=available_scripts,
     )
@@ -248,7 +280,7 @@ def planner(state: AgentState) -> dict[str, Any]:
         user_content += f"\n\n---\n## Extracted Historical Context\n{historical_context}"
 
 
-    llm = _get_llm().with_structured_output(SkillPlan)
+    llm = get_planner_llm().with_structured_output(SkillPlan)
 
     result: SkillPlan = llm.invoke(
         [
@@ -264,10 +296,11 @@ def planner(state: AgentState) -> dict[str, Any]:
     )
     for step in result.steps:
         logger.info(
-            "[planner]   Step %d: optimizer=%s | evaluator=%s",
+            "[planner]   Step %d: optimizer=%s | evaluator=%s | tools_hint=%s",
             step.index,
             step.optimizer_instruction[:80],
             step.evaluator_instruction[:80],
+            step.tools_hint,
         )
 
     output = {
@@ -298,6 +331,9 @@ skill_parser = planner
 def prepare_step_context(state: AgentState) -> dict[str, Any]:
     """Prepare context for the current step — clear L3 messages, build prompt.
 
+    Uses role-specific context from config/optimizer.md and dynamically filters
+    tool documentation based on the step's tools_hint.
+
     L2 skill memory is injected into the **User Prompt** (wrapped in
     ``<skill_memory>`` XML tags) so that the model can clearly distinguish
     global behaviour rules (System) from step-specific context data (User).
@@ -308,18 +344,22 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
     step: StepSchema = state["steps"][state["current_step_index"]]
 
     logger.info(
-        "[prepare_step_context] Node Input — step_index: %d | instruction: %s",
+        "[prepare_step_context] Node Input — step_index: %d | instruction: %s | tools_hint: %s",
         state["current_step_index"],
         step.optimizer_instruction[:100],
+        step.tools_hint,
     )
     _log_memory_state("prepare_step_context", state)
 
-    global_context = load_global_context()
-    tool_docs = get_tool_descriptions()
+    # Load role-specific context instead of monolithic claude.md
+    role_context = load_role_context("optimizer")
 
-    # System prompt: global behaviour + tool docs (NO skill_memory here)
+    # Dynamic tool hinting: only inject docs for hinted tools
+    tool_docs = get_tool_descriptions_for_hint(step.tools_hint)
+
+    # System prompt: role context + filtered tool docs (NO skill_memory here)
     system_prompt = OPTIMIZER_SYSTEM.format(
-        global_context=global_context,
+        role_context=role_context,
         tool_docs=tool_docs,
     )
 
@@ -352,8 +392,9 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
     }
 
     logger.info(
-        "[prepare_step_context] Node Output — cleared %d old messages, injected system + user prompt (L2 in user prompt)",
+        "[prepare_step_context] Node Output — cleared %d old messages, injected system + user prompt (tools_hint=%s)",
         len(remove_msgs),
+        step.tools_hint,
     )
     _log_memory_state("prepare_step_context/after", state)
     return output
@@ -367,13 +408,18 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
 def optimizer_agent(state: AgentState) -> dict[str, Any]:
     """Invoke the Optimizer LLM to execute the current step.
 
-    The Optimizer has access to all tools (safe_cli_executor, safe_py_runner).
-    It will either make tool calls or return a text summary when done.
+    Uses the dense model and dynamically binds only the tools specified
+    in the step's tools_hint.
 
     Logging: Only log "Step X: Tool Call [Name] with [Args]" — do not log
     the result/output of the tool call to keep logs clean.
     """
-    llm = _get_llm().bind_tools(ALL_TOOLS)
+    step: StepSchema = state["steps"][state["current_step_index"]]
+
+    # Dynamic tool binding based on Planner's tools_hint
+    step_tools = filter_tools_by_hint(step.tools_hint)
+    llm = get_optimizer_llm().bind_tools(step_tools)
+
     response: AIMessage = llm.invoke(state["messages"])
 
     tool_call_count = len(response.tool_calls) if response.tool_calls else 0
@@ -416,6 +462,8 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
 def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
     """Wrapper around ToolNode that logs tool inputs.
 
+    Dynamically selects tools based on the current step's tools_hint.
+
     Increments current_loop_count to track how many tool-call
     iterations have occurred within the current step.
 
@@ -430,7 +478,10 @@ def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
                 tc.get("name", "unknown"),
             )
 
-    _tool_node = ToolNode(ALL_TOOLS)
+    # Use filtered tools based on the step's hint
+    step: StepSchema = state["steps"][state["current_step_index"]]
+    step_tools = filter_tools_by_hint(step.tools_hint)
+    _tool_node = ToolNode(step_tools)
     result = _tool_node.invoke(state)
 
     # Increment loop counter
@@ -456,12 +507,14 @@ _evaluator_tool_node = ToolNode(EVALUATOR_TOOLS)
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
 
+    Uses the thinking model and role-specific context from config/evaluator.md.
+
     Generates a step report including:
     - Trajectory: summary of Optimizer's tool calls and reasoning
     - Verdict: PASS or FAIL
     - Feedback: why it passed or what went wrong
 
-    On PASS: extracts key_outputs for L2, sets current_report.
+    On PASS: extracts key_outputs for L2 (path-centric), sets current_report.
     On FAIL: returns report + feedback to Optimizer via message history.
 
     L2 skill memory is injected into the **User Prompt** (wrapped in
@@ -470,8 +523,15 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """
     step: StepSchema = state["steps"][state["current_step_index"]]
 
-    # System prompt: general evaluator behaviour (NO skill_memory)
-    system_prompt = EVALUATOR_SYSTEM
+    # Load role-specific context and tool docs for evaluator
+    role_context = load_role_context("evaluator")
+    tool_docs = get_tool_descriptions_for_hint(["safe_py_runner", "safe_cli_executor"])
+
+    # System prompt: evaluator role context + tool docs
+    system_prompt = EVALUATOR_SYSTEM.format(
+        role_context=role_context,
+        tool_docs=tool_docs,
+    )
 
     # Build evaluator user message with <skill_memory> and <success_criteria>
     skill_memory_block = format_skill_memory(state["skill_memory"])
@@ -488,7 +548,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     )
 
     # Phase 1: Tool-calling loop — let the evaluator invoke verification tools
-    tool_llm = _get_llm().bind_tools(EVALUATOR_TOOLS)
+    tool_llm = get_evaluator_llm().bind_tools(EVALUATOR_TOOLS)
     messages = [SystemMessage(content=system_prompt)] + list(state["messages"]) + [evaluator_user_msg]
 
     eval_tool_call_count = 0
@@ -525,7 +585,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
             messages.append(HumanMessage(content=anchor_content))
 
     # Phase 2: Structured verdict — ask the LLM for its final evaluation
-    verdict_llm = _get_llm().with_structured_output(EvaluationOutput)
+    verdict_llm = get_evaluator_llm().with_structured_output(EvaluationOutput)
     evaluation: EvaluationOutput = verdict_llm.invoke(messages)
 
     # Summarize the Optimizer's trajectory from L3 messages
