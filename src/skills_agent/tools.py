@@ -2,9 +2,12 @@
 
 Protection layers:
     1. Regex validation on every parameter.
-    2. shlex quoting for shell safety.
-    3. Configurable timeout per command.
-    4. Blocked-pattern scanning before execution.
+    2. Configurable timeout per command.
+    3. Blocked-pattern scanning before execution.
+
+All core I/O operations are now handled by Python scripts in scripts/,
+executed via safe_py_runner. The safe_cli_executor retains only the
+python_run sub-command as a legacy execution vector.
 """
 
 from __future__ import annotations
@@ -51,57 +54,6 @@ def _check_blocked_patterns(command: str) -> None:
             )
 
 
-def _normalise_path_params(params: dict[str, str], param_rules: dict[str, str]) -> dict[str, str]:
-    """Convert forward slashes to backslashes in path-like parameters.
-
-    Any parameter whose validation regex allows backslashes (indicating a path
-    parameter) gets its forward slashes replaced with backslashes automatically.
-    This acts as a safety net when the LLM emits UNIX-style paths despite
-    instructions to use Windows-style paths.
-    """
-    normalised = {}
-    for key, value in params.items():
-        rule = param_rules.get(key, "")
-        # If the regex contains \\\\ (escaped backslash), it's a path parameter
-        if "\\\\" in rule or key in ("path", "src", "dst"):
-            normalised[key] = value.replace("/", "\\")
-        else:
-            normalised[key] = value
-    return normalised
-
-
-_SAFE_CMD_VALUE_RE = re.compile(r'^[a-zA-Z0-9_.\\-]+$')
-
-
-def _cmd_quote(value: str) -> str:
-    """Quote a value for Windows CMD.
-
-    Values containing only path-safe characters (alphanumeric, dot, underscore,
-    backslash, hyphen) are returned unquoted — the regex validation layer
-    already guarantees safety.
-
-    Values with spaces or other characters are wrapped in double quotes
-    (the correct quoting mechanism for CMD), with any interior double quotes
-    escaped.  UNIX-style single-quote wrapping (as produced by shlex.quote)
-    must NOT be used because CMD treats single quotes as literal characters.
-    """
-    if _SAFE_CMD_VALUE_RE.fullmatch(value):
-        return value
-    escaped = value.replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def _ps_escape_for_single_quote(value: str) -> str:
-    """Escape a value for use inside a PowerShell single-quoted string.
-
-    In PowerShell single-quoted strings the ONLY special character is the
-    single quote itself, which must be doubled: ' → ''.
-    This is the safest quoting mechanism for arbitrary content (markdown,
-    JSON, etc.) because no other characters ($, `, \", etc.) are interpreted.
-    """
-    return value.replace("'", "''")
-
-
 def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, int]:
     """Validate parameters against whitelist and build the final command string.
 
@@ -117,9 +69,6 @@ def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, in
     param_rules: dict[str, str] = spec.get("params", {})
     timeout: int = spec.get("timeout", 30)
 
-    # Normalise path parameters: forward slashes → backslashes
-    params = _normalise_path_params(params, param_rules)
-
     # Validate every parameter
     for pname, regex in param_rules.items():
         value = params.get(pname, "")
@@ -129,24 +78,10 @@ def _validate_and_build(tool_name: str, params: dict[str, str]) -> tuple[str, in
                 f"allowed pattern {regex!r}"
             )
 
-    # Build command — parameters are already regex-validated so we use
-    # Windows CMD-compatible quoting instead of UNIX shlex.quote() which
-    # wraps values in single quotes (literal characters in CMD, not quotes).
-    #
-    # Parameters wrapped in single quotes in the template (e.g. '{content}')
-    # are intended for PowerShell single-quoted strings.  For these we apply
-    # PS single-quote escaping (' → '') instead of CMD double-quote wrapping,
-    # which would clash with the surrounding quotes.
-    ps_single_quoted_params = {
-        m.group(1)
-        for m in re.finditer(r"'\{(\w+)\}'", template)
-    }
+    # Build command — parameters are already regex-validated
     quoted = {}
     for k, v in params.items():
-        if k in ps_single_quoted_params:
-            quoted[k] = _ps_escape_for_single_quote(v)
-        else:
-            quoted[k] = _cmd_quote(v)
+        quoted[k] = v
     command = template.format(**quoted)
 
     # Final blocked-pattern scan on the assembled command
@@ -186,7 +121,7 @@ class SafeCliInput(BaseModel):
     tool_name: str = Field(
         description=(
             "Name of the whitelisted CLI tool to execute "
-            "(e.g. 'list_files', 'read_file', 'git_status')."
+            "(e.g. 'python_run')."
         )
     )
     params: dict[str, str] = Field(
@@ -199,36 +134,22 @@ class SafeCliInput(BaseModel):
 def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> str:
     """Execute a whitelisted CLI sub-command through the Security Gateway.
 
-    IMPORTANT: This is the ONLY way to run CLI commands. Do NOT call sub-commands
-    (read_file, list_files, etc.) as separate tools — they must be passed as tool_name.
+    NOTE: Most I/O operations have been migrated to Python scripts via safe_py_runner.
+    This tool now primarily supports the python_run sub-command as a legacy vector.
 
     All commands execute with cwd = PROJECT ROOT (the repository root).
-    All path values in params MUST be relative to the project root and use
-    Windows-style backslashes (\\). Forward slashes (/) are NOT allowed.
-
-    Usage: safe_cli_executor(tool_name="<sub_command>", params={"path": "folder\\\\file.txt"})
-
-    Examples:
-      safe_cli_executor(tool_name="read_file", params={"path": "skills\\\\ects_skill\\\\tmp\\\\transcript.txt"})
-      safe_cli_executor(tool_name="list_files", params={"path": "skills\\\\ects_skill\\\\tmp"})
-      safe_cli_executor(tool_name="write_json", params={"path": "skills\\\\ects_skill\\\\tmp\\\\output.json", "content": "..."})
+    All path values in params MUST use forward slashes (/) and be relative to project root.
 
     Available sub-commands (pass as tool_name):
-    - list_files: params={path}
-    - read_file: params={path}
-    - make_directory: params={path}
-    - tree: params={path}
-    - write_json: params={path, content}
-    - write_txt: params={path, content}
-    - write_md: params={path, content}  (NOTE: for markdown with complex formatting, prefer safe_py_runner with scripts/write_file.py + stdin_text instead)
-    - copy_file: params={src, dst}
-    - move_file: params={src, dst}
-    - python_run: params={script}  (e.g. script="scripts\\\\parse_transcript.py")
+    - python_run: params={script}  (e.g. script="scripts/parse_transcript.py")
 
-    REMOVED (use LLM reasoning instead):
-    - search_text: Read the file with read_file, then search in your reasoning
-    - head_file/tail_file: Read the file with read_file, then examine the beginning/end
-    - word_count: Read the file with read_file, then count in your reasoning
+    For file I/O, prefer safe_py_runner with the dedicated scripts:
+    - scripts/read.py — read file content
+    - scripts/list.py — list directory contents
+    - scripts/write_json.py — write JSON files
+    - scripts/write_txt.py — write text files
+    - scripts/write_md.py — write markdown files
+    - scripts/write_file.py — write arbitrary content from stdin
     """
     if params is None:
         params = {}
@@ -243,7 +164,7 @@ class SafePyInput(BaseModel):
     """Input schema for safe_py_runner."""
 
     script_name: str = Field(
-        description="Script filename inside the scripts/ directory (e.g. 'deploy.py')."
+        description="Script path relative to project root (e.g. 'scripts/read.py')."
     )
     args: list[str] = Field(
         default_factory=list,
@@ -273,13 +194,24 @@ def safe_py_runner(
     """Execute a Python script from approved directories.
 
     Allowed directories:
-      - scripts\\           — shared utility scripts
-      - skills\\<skill>\\   — skill-specific scripts (e.g. skills\\ects_skill\\parse_transcript.py)
+      - scripts/           — shared utility scripts
+      - skills/<skill>/    — skill-specific scripts
+
+    All paths use forward slashes (/) and are relative to the project root.
 
     Arguments and env vars are validated for safety.
 
     Use stdin_text to pass large content (markdown, JSON) to scripts that read
     from sys.stdin — this bypasses all shell quoting issues.
+
+    Core I/O scripts available:
+      - scripts/read.py       — read file content: args=[file_path]
+      - scripts/list.py       — list directory: args=[dir_path]
+      - scripts/write_file.py — write from stdin: args=[file_path], stdin_text=content
+      - scripts/write_json.py — write JSON: args=[file_path, json_content]
+      - scripts/write_txt.py  — write text: args=[file_path, text_content]
+      - scripts/write_md.py   — write markdown: args=[file_path, md_content]
+
     Example:
       safe_py_runner(
           script_name="scripts/write_file.py",
@@ -297,7 +229,7 @@ def safe_py_runner(
     scripts_dir = PROJECT_ROOT / "scripts"
     skills_dir = PROJECT_ROOT / "skills"
 
-    # Normalise Windows backslashes to forward slashes for Path resolution
+    # Normalise any backslashes to forward slashes for cross-platform Path resolution
     normalised_name = script_name.replace("\\", "/")
 
     # Determine which allowed directory the script belongs to
@@ -317,8 +249,7 @@ def safe_py_runner(
     if not candidate.suffix == ".py":
         return "[SECURITY BLOCKED] Only .py files are allowed."
 
-    # Validate args — no shell metacharacters (before checking file existence)
-    # Includes \\ to allow Windows-style backslash paths (e.g. skills\\ects_skill\\tmp\\file.txt)
+    # Validate args — no shell metacharacters
     arg_pattern = re.compile(r"^[a-zA-Z0-9_./:@=\\-]+$")
     for arg in args:
         if not arg_pattern.match(arg):
@@ -344,11 +275,7 @@ def safe_py_runner(
         if key in os.environ and key not in env_vars:
             env[key] = os.environ[key]
 
-    # Normalise Windows-style backslash paths to forward slashes.
-    # subprocess.run with a list (shell=False) passes each item verbatim to the
-    # process — no shell quoting needed.  shlex.quote() must NOT be used here
-    # because it wraps backslash-containing strings in literal single-quote
-    # characters, which the receiving script sees as part of the argument value.
+    # Normalise paths in args to forward slashes for cross-platform compatibility
     normalised_args = [a.replace("\\", "/") for a in args]
     cmd = ["python", str(script_path)] + normalised_args
     try:
@@ -382,19 +309,28 @@ EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner]  # Evaluator: read + py ve
 def get_tool_descriptions() -> str:
     """Return human-readable tool documentation for prompt injection."""
     lines: list[str] = []
-    lines.append("Sub-commands for safe_cli_executor (call via tool_name + params):")
+
+    lines.append("## Primary Tool: safe_py_runner")
+    lines.append("All I/O operations use Python scripts executed via safe_py_runner.")
+    lines.append("Available scripts (pass as script_name):")
+    lines.append("  - scripts/read.py       — Read file content. args=[file_path]")
+    lines.append("  - scripts/list.py       — List directory contents. args=[dir_path]")
+    lines.append("  - scripts/write_file.py — Write content from stdin. args=[file_path], stdin_text=content")
+    lines.append("  - scripts/write_json.py — Write JSON file. args=[file_path, json_content]")
+    lines.append("  - scripts/write_txt.py  — Write text file. args=[file_path, text_content]")
+    lines.append("  - scripts/write_md.py   — Write markdown file. args=[file_path, md_content]")
+    lines.append("")
+    lines.append("## Legacy Tool: safe_cli_executor")
+    lines.append("Retains only the python_run sub-command:")
     whitelist = _CONFIG.get("cli_whitelist", {})
     for name, spec in whitelist.items():
         desc = spec.get("description", "")
         params = spec.get("params", {})
-        param_str = ", ".join(f"{k}" for k in params)
         lines.append(
             f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
         )
     lines.append("")
-    lines.append("IMPORTANT: All path values MUST be relative to the PROJECT ROOT and use Windows-style backslashes (\\\\).")
-    lines.append("  CORRECT: 'skills\\\\ects_skill\\\\tmp\\\\output.json'")
-    lines.append("  WRONG:   'skills/ects_skill/tmp/output.json'")
-    lines.append("  WRONG:   'ects_skill\\\\tmp\\\\output.json'  ← missing 'skills\\\\' prefix")
-    lines.append("Forward slashes in paths are NOT allowed and will be rejected.")
+    lines.append("IMPORTANT: All path values MUST use forward slashes (/) and be relative to the PROJECT ROOT.")
+    lines.append("  CORRECT: 'skills/ects_skill/tmp/output.json'")
+    lines.append("  WRONG:   'skills\\\\ects_skill\\\\tmp\\\\output.json'  ← backslashes are not required")
     return "\n".join(lines)

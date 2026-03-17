@@ -189,6 +189,8 @@ def run(skill_content: str, md_path: Path) -> dict:
         "messages": [],
         "last_evaluation": "",
         "plan_approved": False,
+        "report_state": [],
+        "current_report": "",
     }
 
     # Phase 1: Parse the skill into a plan
@@ -264,6 +266,16 @@ def run(skill_content: str, md_path: Path) -> dict:
     if result:
         print(f"  Steps completed: {result.get('current_step_index', 0)}/{len(result.get('steps', []))}")
         print(f"  Skill Memory:\n{result.get('skill_memory', '(empty)')}")
+
+        # Display aggregated report_state
+        report_state = result.get("report_state", [])
+        if report_state:
+            print("\n" + "-" * 60)
+            print("  AGGREGATED STEP REPORTS")
+            print("-" * 60)
+            for report in report_state:
+                print(report)
+                print()
     print("=" * 60)
 
     # Phase 4: Ask for human feedback after workflow completion

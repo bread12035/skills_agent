@@ -4,8 +4,8 @@ Nodes:
     1. planner             — context-aware planning from skill definitions
     2. prepare_step_context — prepare context for the next step
     3. optimizer_agent      — execute the step using tools
-    4. evaluator_agent      — verify step completion
-    5. commit_step          — persist outputs and advance index
+    4. evaluator_agent      — verify step completion and generate report
+    5. commit_step          — persist outputs, append report, and advance index
 """
 
 from __future__ import annotations
@@ -115,32 +115,6 @@ def _get_llm(model: str = _DEFAULT_MODEL, **kwargs: Any) -> ChatOpenAI:
 
 
 # ---------------------------------------------------------------------------
-# Path normalisation helper
-# ---------------------------------------------------------------------------
-
-# Matches UNIX-style relative paths such as "ects_skill/tmp/output.json" or
-# "hello_skill/output.txt" but avoids protocol prefixes like "https://".
-_UNIX_PATH_RE = re.compile(
-    r'(?<![a-zA-Z]:)'        # not preceded by a drive-letter colon (e.g. C:)
-    r'(?<!/)'                 # not preceded by another slash (avoids "//", "://")
-    r'(?:[a-zA-Z0-9_.][a-zA-Z0-9_.\-]*)'   # first path segment
-    r'(?:/[a-zA-Z0-9_.][a-zA-Z0-9_.\-]*)+' # one or more "/segment" continuations
-)
-
-
-def _to_windows_paths(text: str) -> str:
-    """Replace UNIX-style forward-slash paths with Windows-style backslash paths.
-
-    Only converts path-like tokens (e.g. ``ects_skill/tmp/output.json``) and
-    leaves URLs, prose, and other content untouched.
-    """
-    def _replace(m: re.Match) -> str:
-        return m.group(0).replace("/", "\\")
-
-    return _UNIX_PATH_RE.sub(_replace, text)
-
-
-# ---------------------------------------------------------------------------
 # Script discovery helper (for Planner tool awareness)
 # ---------------------------------------------------------------------------
 
@@ -203,6 +177,41 @@ def _extract_historical_sections(skill_content: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Trajectory summarization helper
+# ---------------------------------------------------------------------------
+
+
+def _summarize_trajectory(messages: list) -> str:
+    """Summarize the Optimizer's tool calls and reasoning from L3 messages.
+
+    Returns a concise trajectory string capturing the sequence of actions taken.
+    """
+    trajectory_parts: list[str] = []
+    for msg in messages:
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tc in msg.tool_calls:
+                tool_name = tc.get("name", "unknown")
+                tool_args = tc.get("args", {})
+                args_summary = ", ".join(
+                    f"{k}={repr(v)[:40]}" for k, v in tool_args.items()
+                )
+                trajectory_parts.append(f"Tool: {tool_name}({args_summary})")
+        elif (
+            hasattr(msg, "content")
+            and isinstance(msg.content, str)
+            and msg.content.strip()
+            and not msg.content.startswith("[Evaluator]")
+            and hasattr(msg, "type")
+            and getattr(msg, "type", "") == "ai"
+        ):
+            # Optimizer reasoning text
+            preview = msg.content[:100].replace("\n", " ")
+            trajectory_parts.append(f"Reasoning: {preview}")
+
+    return " → ".join(trajectory_parts) if trajectory_parts else "(no actions recorded)"
+
+
+# ---------------------------------------------------------------------------
 # Node 0: Planner (formerly skill_parser)
 # ---------------------------------------------------------------------------
 
@@ -211,7 +220,7 @@ def planner(state: AgentState) -> dict[str, Any]:
     """Context-aware Planner: parse skill definition into a structured SkillPlan.
 
     The Planner has access to:
-    - Tool definitions (safe_cli_executor sub-commands, safe_py_runner)
+    - Tool definitions (safe_py_runner scripts, safe_cli_executor sub-commands)
     - Available scripts in scripts/ and skills/*/
     - Historical execution data (Success Cases, Failure Cases, Human Feedback)
 
@@ -248,11 +257,6 @@ def planner(state: AgentState) -> dict[str, Any]:
         ]
     )
 
-    # Post-process: convert any remaining UNIX-style paths to Windows backslashes
-    for step in result.steps:
-        step.optimizer_instruction = _to_windows_paths(step.optimizer_instruction)
-        step.evaluator_instruction = _to_windows_paths(step.evaluator_instruction)
-
     logger.info(
         "[planner] Parsed plan — goal: %s | steps: %d",
         result.goal,
@@ -275,6 +279,8 @@ def planner(state: AgentState) -> dict[str, Any]:
         "last_evaluation": "",
         "plan_approved": False,
         "step_tool_call_count": 0,
+        "report_state": [],
+        "current_report": "",
     }
     _log_node_io("planner", "Node Output", output)
     return output
@@ -342,6 +348,7 @@ def prepare_step_context(state: AgentState) -> dict[str, Any]:
         "step_tool_call_count": 0,  # reset tool call counter for new step
         "last_evaluation": "",
         "current_loop_count": 0,
+        "current_report": "",
     }
 
     logger.info(
@@ -362,20 +369,34 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
 
     The Optimizer has access to all tools (safe_cli_executor, safe_py_runner).
     It will either make tool calls or return a text summary when done.
+
+    Logging: Only log "Step X: Tool Call [Name] with [Args]" — do not log
+    the result/output of the tool call to keep logs clean.
     """
     llm = _get_llm().bind_tools(ALL_TOOLS)
     response: AIMessage = llm.invoke(state["messages"])
 
     tool_call_count = len(response.tool_calls) if response.tool_calls else 0
+    step_index = state.get("current_step_index", 0)
 
-    if not response.tool_calls:
-        # Log the optimizer's completion text (ATTEMPTS_COMPLETE summary or text output)
+    if response.tool_calls:
+        # Log only the tool call name and args (not results)
+        for tc in response.tool_calls:
+            logger.info(
+                "[optimizer_agent] Step %d: Tool Call [%s] with [%s]",
+                step_index,
+                tc.get("name", "unknown"),
+                json.dumps(tc.get("args", {})),
+            )
+    else:
+        # Log the optimizer's completion text
         text = response.content if isinstance(response.content, str) else "(non-text)"
         if text.strip().startswith(_ATTEMPTS_COMPLETE_SIGNAL):
-            logger.info("[optimizer_agent] Completed:\n%s", text)
+            logger.info("[optimizer_agent] Step %d: Completed", step_index)
         else:
             logger.warning(
-                "[optimizer_agent] Text output (missing [ATTEMPTS_COMPLETE]):\n%s", text
+                "[optimizer_agent] Step %d: Text output (missing [ATTEMPTS_COMPLETE])",
+                step_index,
             )
 
     # Update cumulative tool call count for L3 anchoring
@@ -393,31 +414,24 @@ def optimizer_agent(state: AgentState) -> dict[str, Any]:
 
 
 def _logging_tool_executor(state: AgentState) -> dict[str, Any]:
-    """Wrapper around ToolNode that logs tool inputs and raw outputs.
+    """Wrapper around ToolNode that logs tool inputs.
 
-    Also increments current_loop_count to track how many tool-call
+    Increments current_loop_count to track how many tool-call
     iterations have occurred within the current step.
+
+    Note: Only the tool call name/args are logged by optimizer_agent.
+    Tool results are NOT logged to keep logs clean per SDD §3.1.
     """
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         for tc in last_msg.tool_calls:
             logger.info(
-                "[tool_executor] Tool Call — %s | args: %s",
+                "[tool_executor] Executing — %s",
                 tc.get("name", "unknown"),
-                json.dumps(tc.get("args", {})),
             )
 
     _tool_node = ToolNode(ALL_TOOLS)
     result = _tool_node.invoke(state)
-
-    # Log tool outputs (full content for supervisory clarity)
-    if "messages" in result:
-        for msg in result["messages"]:
-            content = msg.content if hasattr(msg, "content") else str(msg)
-            logger.info(
-                "[tool_executor] Tool Result — %s",
-                content if isinstance(content, str) else str(content),
-            )
 
     # Increment loop counter
     new_count = state.get("current_loop_count", 0) + 1
@@ -441,6 +455,14 @@ _evaluator_tool_node = ToolNode(EVALUATOR_TOOLS)
 
 def evaluator_agent(state: AgentState) -> dict[str, Any]:
     """Evaluate whether the Optimizer successfully completed the step.
+
+    Generates a step report including:
+    - Trajectory: summary of Optimizer's tool calls and reasoning
+    - Verdict: PASS or FAIL
+    - Feedback: why it passed or what went wrong
+
+    On PASS: extracts key_outputs for L2, sets current_report.
+    On FAIL: returns report + feedback to Optimizer via message history.
 
     L2 skill memory is injected into the **User Prompt** (wrapped in
     ``<skill_memory>`` XML tags), and the evaluator_instruction is placed
@@ -506,6 +528,27 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     verdict_llm = _get_llm().with_structured_output(EvaluationOutput)
     evaluation: EvaluationOutput = verdict_llm.invoke(messages)
 
+    # Summarize the Optimizer's trajectory from L3 messages
+    trajectory = _summarize_trajectory(state["messages"])
+    evaluation.trajectory = trajectory
+
+    # Generate the step report
+    step_report = (
+        f"--- Step {step.index} Report ---\n"
+        f"Trajectory: {trajectory}\n"
+        f"Verdict: {evaluation.verdict.value}\n"
+        f"Feedback: {evaluation.feedback}\n"
+    )
+    if evaluation.key_outputs:
+        step_report += f"Key Outputs: {json.dumps(evaluation.key_outputs)}\n"
+    step_report += "---"
+
+    # Log the report template
+    logger.info(
+        "[evaluator_agent] Report Template:\n%s",
+        step_report,
+    )
+
     # Log verdict, feedback, and key outputs for supervisory clarity
     logger.info(
         "[evaluator_agent] Verdict: %s | Feedback: %s",
@@ -530,6 +573,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
         "messages": [feedback_msg],
         "last_evaluation": evaluation.model_dump_json(),
         "step_retry_count": state["step_retry_count"] + 1,
+        "current_report": step_report,
     }
 
 
@@ -539,7 +583,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
 
 
 def commit_step(state: AgentState) -> dict[str, Any]:
-    """Commit the current step's outputs to skill memory and advance the index."""
+    """Commit the current step's outputs to skill memory, append report, and advance index."""
     logger.info(
         "[commit_step] Node Input — step_index: %d | last_evaluation: %s",
         state["current_step_index"],
@@ -561,14 +605,23 @@ def commit_step(state: AgentState) -> dict[str, Any]:
         list(evaluation.key_outputs.keys()),
     )
 
+    # Append the current step's report to the cumulative report_state
+    current_report = state.get("current_report", "")
+    report_state = list(state.get("report_state", []))
+    if current_report:
+        report_state.append(current_report)
+
     output = {
         "skill_memory": new_memory,
         "current_step_index": state["current_step_index"] + 1,
+        "report_state": report_state,
+        "current_report": "",
     }
     logger.info(
-        "[commit_step] Node Output — new skill_memory: %r | next_step_index: %d",
+        "[commit_step] Node Output — new skill_memory: %r | next_step_index: %d | reports: %d",
         new_memory[:200] if new_memory else "(empty)",
         output["current_step_index"],
+        len(report_state),
     )
     return output
 

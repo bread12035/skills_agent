@@ -103,3 +103,29 @@ class TestEvaluationOutput:
         restored = EvaluationOutput.model_validate_json(json_str)
         assert restored.verdict == original.verdict
         assert restored.key_outputs == original.key_outputs
+
+    def test_trajectory_field(self):
+        result = EvaluationOutput(
+            verdict=EvalResult.PASS,
+            feedback="All criteria met.",
+            key_outputs={"output": "data"},
+            trajectory="Tool: safe_py_runner(scripts/read.py) → Reasoning: file read OK",
+        )
+        assert result.trajectory == "Tool: safe_py_runner(scripts/read.py) → Reasoning: file read OK"
+
+    def test_trajectory_default_empty(self):
+        result = EvaluationOutput(
+            verdict=EvalResult.PASS,
+            feedback="OK",
+        )
+        assert result.trajectory == ""
+
+    def test_trajectory_roundtrip_json(self):
+        original = EvaluationOutput(
+            verdict=EvalResult.PASS,
+            feedback="OK",
+            trajectory="Tool: safe_py_runner(scripts/read.py)",
+        )
+        json_str = original.model_dump_json()
+        restored = EvaluationOutput.model_validate_json(json_str)
+        assert restored.trajectory == original.trajectory
