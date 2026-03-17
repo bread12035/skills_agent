@@ -30,9 +30,9 @@ prepare_step_context → optimizer_agent ↔ tool_executor (loop)
          next step          END
 ```
 
-Optimizer uses `safe_cli_executor` and `safe_py_runner` to execute step instructions.
+Optimizer uses `safe_py_runner` (primary) and `safe_cli_executor` (legacy) to execute step instructions.
 Evaluator also uses both tools for verification, plus produces a structured `EvaluationOutput`:
-- **PASS** → commit `key_outputs` to L2 skill memory, advance to next step
+- **PASS** → commit `key_outputs` to L2 skill memory, append step report to `report_state`, advance to next step
 - **FAIL** → retry (up to `max_retries=3`) or route to `human_intervention`
 
 ### Completion Signal
@@ -62,6 +62,12 @@ Evaluator extracts `key_outputs` from completed steps; committed by `commit_step
 the **User Prompt** of both Optimizer and Evaluator inside `<skill_memory>` XML tags.
 Format: `KEY=VALUE` lines. L3 is cleared between steps — L2 is the ONLY cross-step data bridge.
 
+**L2 — Report State**: Cumulative list of step reports (`report_state` field in `AgentState`).
+Each time a step passes, the Evaluator's report (trajectory, verdict, feedback, key outputs)
+is appended to `report_state` by `commit_step`. The `current_report` field holds the active
+step's report before it is committed. Upon completing the entire plan, the agent's final
+response includes the aggregated content of `report_state`.
+
 **L3 — Loop Context**: `messages` list in `AgentState` holding the Optimizer ↔ tool ↔ Evaluator
 dialogue for the current step. Cleared at the start of each new step by `prepare_step_context`
 (via `RemoveMessage` for all existing messages).
@@ -77,43 +83,42 @@ The Planner reads all three sections and uses them to improve subsequent plans.
 
 ### Security Gateway
 
-All tool execution via parametric whitelist (`config/tools_config.yaml`):
+All tool execution is strictly Python-script-based via `safe_py_runner`, with `safe_cli_executor`
+retained as a legacy vector for the `python_run` sub-command only.
+
+Security layers (`config/tools_config.yaml`):
 - Regex validation on every parameter before execution
 - Blocked-pattern scanning on the assembled command string
-- Per-tool configurable timeouts (10s CLI, 120s Python scripts)
+- Per-tool configurable timeouts (120s for Python scripts)
 - Path-escape prevention for Python scripts (must be inside `scripts/` or `skills/<skill>/`)
-- Automatic path normalisation: forward slashes in path params → backslashes
+- All CLI whitelist entries (list_files, read_file, etc.) have been migrated to Python scripts
 
 ### Tools
 
-**safe_cli_executor**: Dispatches to whitelisted CLI sub-commands (Windows CMD syntax).
-Available sub-commands: `list_files`, `read_file`, `make_directory`, `tree`, `copy_file`, `move_file`, `python_run`.
-Text-analysis operations (search, count, head, tail) are intentionally absent — the LLM reasons over file content directly.
-
-**safe_py_runner**: Executes Python scripts from approved directories.
+**safe_py_runner** (PRIMARY): Executes Python scripts from approved directories.
 Supports `args` (positional args), `env_vars` (injected environment), and `stdin_text`
 (pipe large or quote-sensitive content into the script's stdin — preferred for file writing).
 Allowed directories: `scripts/` and `skills/<skill>/`.
 
-**All file writing must use safe_py_runner** with scripts in `scripts/`:
-- `scripts/write_file.py` — write arbitrary content from stdin (preferred for markdown/JSON)
-- `scripts/write_json.py` — write JSON via args
-- `scripts/write_txt.py` — write plain text via args
-- `scripts/write_md.py` — write markdown via args
+Core I/O scripts:
+- `scripts/read.py` — Read file content
+- `scripts/list.py` — List directory contents
+- `scripts/write_file.py` — Write arbitrary content from stdin (preferred for markdown/JSON)
+- `scripts/write_json.py` — Write JSON via args
+- `scripts/write_txt.py` — Write plain text via args
+- `scripts/write_md.py` — Write markdown via args
+
+**safe_cli_executor** (LEGACY): Dispatches to whitelisted CLI sub-commands.
+Only `python_run` remains active. All other sub-commands (list_files, read_file, etc.)
+have been commented out and migrated to Python scripts.
 
 ### Path Conventions
 
 All paths relative to PROJECT_ROOT (repository root containing `pyproject.toml`).
+All paths use forward slashes (/) — cross-platform compatible.
 
-**CLI tools (safe_cli_executor)**: Windows-style backslashes required.
-Path params containing forward slashes are auto-normalised to backslashes.
-- CORRECT: `skills\\ects_skill\\tmp\\output.json`
-- WRONG: `skills/ects_skill/tmp/output.json`
-- WRONG: `ects_skill\\tmp\\output.json` ← missing `skills\\` prefix
-
-**Python scripts (safe_py_runner)**: Forward slashes or backslashes accepted.
-- CORRECT: `scripts/write_file.py`
-- CORRECT: `skills/ects_skill/retrieve_transcript.py`
+- CORRECT: `skills/ects_skill/tmp/output.json`
+- WRONG: `skills\ects_skill\tmp\output.json` ← Windows backslashes are not required
 
 ### Step Schema
 
@@ -122,3 +127,14 @@ Each step in a `SkillPlan` has two separate instruction fields:
 - `evaluator_instruction`: how the Evaluator verifies success + which `key_outputs` to extract into L2
 
 One action per step: either a single tool call OR a pure text-processing task (no mixing).
+
+### Evaluator Reporting
+
+For every step, the Evaluator generates a report containing:
+- **Trajectory**: Summary of the Optimizer's tool calls and reasoning
+- **Verdict**: PASS or FAIL
+- **Feedback**: Why it passed or what went wrong
+- **Key Outputs**: Data extracted for L2 memory (on PASS)
+
+On PASS, the report is appended to `report_state`. On FAIL, the report + feedback
+is returned to the Optimizer via message history for retry.

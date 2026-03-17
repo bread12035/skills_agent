@@ -31,6 +31,8 @@ def _make_state(**overrides) -> AgentState:
         "last_evaluation": "",
         "raw_input": "test",
         "plan_approved": False,
+        "report_state": [],
+        "current_report": "",
     }
     base.update(overrides)
     return base

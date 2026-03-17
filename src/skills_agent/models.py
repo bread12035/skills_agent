@@ -77,6 +77,10 @@ class EvaluationOutput(BaseModel):
         default_factory=dict,
         description="Key-value pairs to persist in skill_memory (only on PASS).",
     )
+    trajectory: str = Field(
+        default="",
+        description="Summary of the Optimizer's tool calls and reasoning for this step.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +113,10 @@ class AgentState(TypedDict):
 
     # --- Evaluator ---
     last_evaluation: str  # serialised EvaluationOutput JSON
+
+    # --- Reporting ---
+    report_state: list[str]  # cumulative list of successful step reports
+    current_report: str  # report of the current active step before commit
 
     # --- Meta ---
     raw_input: str
