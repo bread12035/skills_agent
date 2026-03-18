@@ -138,7 +138,7 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
     This tool now primarily supports the python_run sub-command as a legacy vector.
 
     All commands execute with cwd = PROJECT ROOT (the repository root).
-    All path values in params MUST use forward slashes (/) and be relative to project root.
+    All path values in params MUST be relative to the project root.
 
     Available sub-commands (pass as tool_name):
     - python_run: params={script}  (e.g. script="scripts/parse_transcript.py")
@@ -197,7 +197,7 @@ def safe_py_runner(
       - scripts/           — shared utility scripts
       - skills/<skill>/    — skill-specific scripts
 
-    All paths use forward slashes (/) and are relative to the project root.
+    All paths are relative to the project root.
 
     Arguments and env vars are validated for safety.
 
@@ -240,11 +240,8 @@ def safe_py_runner(
     scripts_dir = PROJECT_ROOT / "scripts"
     skills_dir = PROJECT_ROOT / "skills"
 
-    # Normalise any backslashes to forward slashes for cross-platform Path resolution
-    normalised_name = script_name.replace("\\", "/")
-
     # Determine which allowed directory the script belongs to
-    candidate = (PROJECT_ROOT / normalised_name).resolve()
+    candidate = (PROJECT_ROOT / script_name).resolve()
 
     allowed = False
     if candidate.is_relative_to(scripts_dir):
@@ -291,9 +288,7 @@ def safe_py_runner(
         if key in os.environ and key not in env_vars:
             env[key] = os.environ[key]
 
-    # Normalise paths in args to forward slashes for cross-platform compatibility
-    normalised_args = [a.replace("\\", "/") for a in args]
-    cmd = ["python", str(script_path)] + normalised_args
+    cmd = ["python", str(script_path)] + args
     try:
         result = subprocess.run(
             cmd,
@@ -403,7 +398,7 @@ def get_tool_descriptions_for_hint(tools_hint: list[str]) -> str:
             )
         lines.append("")
 
-    lines.append("IMPORTANT: All path values MUST use forward slashes (/) and be relative to the PROJECT ROOT.")
+    lines.append("IMPORTANT: All path values MUST be relative to the PROJECT ROOT.")
     return "\n".join(lines)
 
 
@@ -442,7 +437,6 @@ def get_tool_descriptions() -> str:
             f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
         )
     lines.append("")
-    lines.append("IMPORTANT: All path values MUST use forward slashes (/) and be relative to the PROJECT ROOT.")
-    lines.append("  CORRECT: 'skills/ects_skill/tmp/output.json'")
-    lines.append("  WRONG:   'skills\\\\ects_skill\\\\tmp\\\\output.json'  ← backslashes are not required")
+    lines.append("IMPORTANT: All path values MUST be relative to the PROJECT ROOT.")
+    lines.append("  Example: 'skills/ects_skill/tmp/output.json'")
     return "\n".join(lines)
