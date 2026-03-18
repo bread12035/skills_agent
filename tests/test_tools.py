@@ -152,7 +152,7 @@ class TestToolDescriptions:
         assert "scripts/write_txt.py" in desc
         assert "scripts/write_md.py" in desc
 
-    def test_forward_slash_paths(self):
-        """Tool descriptions should use forward slashes, not backslashes."""
+    def test_path_example_in_descriptions(self):
+        """Tool descriptions should include a path example."""
         desc = get_tool_descriptions()
-        assert "forward slashes" in desc.lower() or "CORRECT: 'skills/ects_skill" in desc
+        assert "Example: 'skills/ects_skill" in desc

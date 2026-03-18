@@ -21,8 +21,7 @@ decompose the user's request into a sequence of granular, executable steps.
 </role>
 
 <environment>
-Platform: Cross-platform (Python-based)
-All file paths MUST use forward slashes (/).
+Platform: Unix/Linux (Python-based)
 All I/O operations use Python scripts via safe_py_runner.
 </environment>
 
@@ -83,8 +82,7 @@ requires both, split it into separate steps.
 For each step you MUST provide two distinct instructions:
 
 1. **optimizer_instruction**: Tells the Optimizer *how to execute* the step. \
-   Include specific actions, script names, file paths (using forward slashes), \
-   and an explicit stop signal.
+   Include specific actions, script names, file paths, and an explicit stop signal.
 
 2. **evaluator_instruction**: Tells the Evaluator *how to verify* the step. \
    Include concrete success criteria, what to check, and which key_outputs to \
@@ -107,9 +105,8 @@ should use. This controls which tools are injected into the Optimizer's context:
   extracted into L2 memory.
 
 ## Path Format
-All file paths MUST be relative to the project root and use forward slashes (/).
-  CORRECT: "skills/ects_skill/tmp/output.json"
-  WRONG:   "skills\\\\ects_skill\\\\tmp\\\\output.json"
+All file paths MUST be relative to the project root.
+  Example: "skills/ects_skill/tmp/output.json"
 </rules>
 
 <output_format>
@@ -133,8 +130,7 @@ You are an Optimizer Agent responsible for executing a single step of a plan.
 </role>
 
 <environment>
-Platform: Cross-platform (Python-based)
-All file paths MUST use forward slashes (/).
+Platform: Unix/Linux (Python-based)
 All I/O operations use Python scripts via safe_py_runner.
 </environment>
 
@@ -173,8 +169,7 @@ via L2 skill memory.
 </role>
 
 <environment>
-Platform: Cross-platform (Python-based)
-All file paths MUST use forward slashes (/).
+Platform: Unix/Linux (Python-based)
 All I/O operations use Python scripts via safe_py_runner.
 </environment>
 
@@ -242,7 +237,7 @@ PRIMARY_DIRECTIVE_ANCHOR = """\
 </primary_directive>
 
 <environment>
-Platform: Cross-platform — use forward slash (/) paths and Python scripts for I/O.
+Platform: Unix/Linux — use Python scripts for I/O.
 </environment>
 """
 
