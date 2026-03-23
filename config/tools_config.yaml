@@ -92,6 +92,10 @@ cli_whitelist:
 #   - scripts/claude_xlsx.py        — Generate XLSX. args=[output_path], stdin_text=prompt
 #   - scripts/claude_frontend_design.py — Generate HTML/CSS/JS. args=[output_path], stdin_text=prompt
 
+# Temporal Knowledge Graph (executed via safe_py_runner):
+#   - scripts/create_temporal_graph.py  — Build temporal graph from text. args=[skill_name, input_path_or_text, --source-type, --reference-date]
+#   - scripts/inference_with_graph.py   — Query temporal graph. args=[skill_name, query, --entry-nodes, --as-of, --max-hops, --top-k, --no-synthesize]
+
 # Blocked patterns — commands that must NEVER be executed
 blocked_patterns:
   - "rm\\s+-rf"
