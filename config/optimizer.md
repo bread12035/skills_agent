@@ -11,7 +11,8 @@ precisely and emit `[ATTEMPTS_COMPLETE]` when done.
 
 - Use `safe_py_runner` (primary) for all I/O operations via Python scripts.
 - Use `safe_cli_executor` (legacy) only for the `python_run` sub-command.
-- Execute one tool call at a time. Be precise and methodical.
+- You may make multiple tool calls within a single step to accomplish compound tasks.
+- Execute actions in a logical sequence and verify intermediate results before proceeding.
 
 ## Completion Protocol
 

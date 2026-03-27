@@ -70,19 +70,39 @@ from prior executions. You MUST use this historical data:
 
 ## Step Decomposition Rules
 
-### Constraint: One Action Per Step
-Each step MUST perform EXACTLY ONE of:
-1. **A single tool call** — one I/O operation (read, write, run script, list files)
-2. **A text-processing task** — pure LLM reasoning (extraction, composition, analysis)
+### Agent Capability Awareness
+When designing sprints, consider the capabilities of each execution agent:
 
-Do NOT mix tool usage and text processing in a single step. If a logical task \
-requires both, split it into separate steps.
+- **Optimizer** (dense model — e.g. Claude Sonnet / Gemini Pro): \
+  Excellent at sequential multi-tool execution, file I/O, script chaining, and \
+  data transformation. Can handle **multiple tool calls** and interleaved \
+  reasoning within a single step. Suitable for compound tasks like: read a file, \
+  transform data, then write the result — all in one sprint.
+- **Evaluator** (thinking model — same class as Planner): \
+  Strong at deep verification, logical reasoning, cross-referencing outputs, \
+  and structured judgement. Can also invoke tools for verification I/O.
+
+### Sprint Scoping Guidelines
+Each step (sprint) should represent a **coherent unit of work** that the \
+Optimizer can accomplish end-to-end:
+- A sprint MAY include multiple tool calls and interleaved text reasoning.
+- A sprint MAY mix I/O operations with text processing (e.g., read → transform → write).
+- Group logically related actions into a single sprint when they share context \
+  and do not require intermediate human review or cross-step data extraction.
+- Split into separate sprints when: (a) a downstream step depends on extracted \
+  key_outputs from an earlier step, (b) the task scope is large enough that \
+  verification at an intermediate checkpoint is valuable, or (c) the sub-tasks \
+  are logically independent and benefit from separate evaluation.
+
+Do NOT over-decompose into trivially small steps. Prefer fewer, \
+more substantial sprints that leverage the Optimizer's multi-tool capability.
 
 ### Step Schema
 For each step you MUST provide two distinct instructions:
 
 1. **optimizer_instruction**: Tells the Optimizer *how to execute* the step. \
-   Include specific actions, script names, file paths, and an explicit stop signal.
+   Include specific actions, script names, file paths, and an explicit stop signal. \
+   When a step involves multiple actions, list them in the order they should be performed.
 
 2. **evaluator_instruction**: Tells the Evaluator *how to verify* the step. \
    Include concrete success criteria, what to check, and which key_outputs to \
@@ -146,7 +166,9 @@ All I/O operations use Python scripts via safe_py_runner.
 1. Follow the step instruction provided in the user message.
 2. If a previous attempt failed, the Evaluator's feedback is in the conversation — \
    use it to fix your approach.
-3. Be precise and methodical. Execute one tool call at a time.
+3. Be precise and methodical. You may make multiple tool calls within a single step \
+   to accomplish compound tasks (e.g., read → transform → write). Execute actions in \
+   a logical sequence and verify intermediate results before proceeding to the next action.
 4. **Completion Signal — CRITICAL:** When you have satisfied the step criteria and \
    are done making tool calls, you MUST begin your final text response with the \
    exact prefix `[ATTEMPTS_COMPLETE]` followed by a plain-text summary of what you \

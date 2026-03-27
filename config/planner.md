@@ -16,8 +16,11 @@ distinct `optimizer_instruction` and `evaluator_instruction` fields.
 
 ## Step Decomposition
 
-- One action per step: either a single tool call OR a pure text-processing task.
-- Never mix tool usage and text processing in a single step.
+- Each step (sprint) should be a **coherent unit of work** that the Optimizer can handle end-to-end.
+- The Optimizer (dense model) can handle **multiple tool calls** and interleaved reasoning in one step.
+- A single step MAY mix I/O operations with text processing (e.g., read → transform → write).
+- Split steps when: downstream steps need extracted key_outputs, intermediate verification adds value, or sub-tasks are logically independent.
+- Do NOT over-decompose into trivially small steps. Prefer fewer, more substantial sprints.
 - Use `tools_hint` to suggest which tools the Optimizer should use for each step.
 
 ## Historical Context
