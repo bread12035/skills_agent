@@ -32,6 +32,7 @@ from skills_agent.models import (
     AgentState,
     EvalResult,
     EvaluationOutput,
+    SandboxScript,
     SkillPlan,
     StepSchema,
 )
@@ -525,7 +526,7 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
 
     # Load role-specific context and tool docs for evaluator
     role_context = load_role_context("evaluator")
-    tool_docs = get_tool_descriptions_for_hint(["safe_py_runner", "safe_cli_executor"])
+    tool_docs = get_tool_descriptions_for_hint(["safe_py_runner", "safe_cli_executor", "run_in_sandbox"])
 
     # System prompt: evaluator role context + tool docs
     system_prompt = EVALUATOR_SYSTEM.format(
@@ -552,6 +553,8 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     messages = [SystemMessage(content=system_prompt)] + list(state["messages"]) + [evaluator_user_msg]
 
     eval_tool_call_count = 0
+    sandbox_scripts: list[SandboxScript] = []  # Capture sandbox-generated scripts
+
     for round_num in range(_EVALUATOR_MAX_TOOL_ROUNDS):
         response: AIMessage = tool_llm.invoke(messages)
         messages.append(response)
@@ -575,6 +578,37 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
                 "[evaluator_agent] Verification Result — %s",
                 content if isinstance(content, str) else str(content),
             )
+
+            # Capture sandbox script results from run_in_sandbox tool calls
+            if isinstance(content, str) and content.strip().startswith("{"):
+                try:
+                    sandbox_result = json.loads(content)
+                    if (
+                        isinstance(sandbox_result, dict)
+                        and "code" in sandbox_result
+                        and sandbox_result.get("code")
+                    ):
+                        # Find the matching run_in_sandbox call for description
+                        description = ""
+                        if hasattr(response, "tool_calls"):
+                            for tc in response.tool_calls:
+                                if tc.get("name") == "run_in_sandbox":
+                                    description = tc.get("args", {}).get("prompt", "")[:200]
+                                    break
+                        sandbox_scripts.append(
+                            SandboxScript(
+                                description=description,
+                                code=sandbox_result["code"],
+                                output=sandbox_result.get("output", ""),
+                            )
+                        )
+                        logger.info(
+                            "[evaluator_agent] Captured sandbox script — %d chars of code",
+                            len(sandbox_result["code"]),
+                        )
+                except (json.JSONDecodeError, KeyError):
+                    pass  # Not a sandbox result — ignore
+
         messages.extend(tool_result["messages"])
 
         # L3 Anchoring for evaluator: inject <primary_directive> every N tool calls
@@ -587,6 +621,10 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     # Phase 2: Structured verdict — ask the LLM for its final evaluation
     verdict_llm = get_evaluator_llm().with_structured_output(EvaluationOutput)
     evaluation: EvaluationOutput = verdict_llm.invoke(messages)
+
+    # Attach captured sandbox scripts to the evaluation
+    if sandbox_scripts:
+        evaluation.sandbox_scripts = sandbox_scripts
 
     # Summarize the Optimizer's trajectory from L3 messages
     trajectory = _summarize_trajectory(state["messages"])
@@ -601,6 +639,19 @@ def evaluator_agent(state: AgentState) -> dict[str, Any]:
     )
     if evaluation.key_outputs:
         step_report += f"Key Outputs: {json.dumps(evaluation.key_outputs)}\n"
+    if evaluation.sandbox_scripts:
+        step_report += "\n## Sandbox Scripts (for engineer review)\n"
+        for idx, script in enumerate(evaluation.sandbox_scripts, 1):
+            step_report += (
+                f"\n### Script {idx}: {script.description}\n"
+                f"```python\n{script.code}\n```\n"
+            )
+            if script.output:
+                step_report += f"**Output:**\n```\n{script.output[:2000]}\n```\n"
+        step_report += (
+            "\n> Engineers: review the above scripts and run "
+            "`cp <script> scripts/` to promote useful ones.\n"
+        )
     step_report += "---"
 
     # Log the report template

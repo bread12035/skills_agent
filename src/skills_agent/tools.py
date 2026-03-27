@@ -160,6 +160,106 @@ def safe_cli_executor(tool_name: str, params: dict[str, str] | None = None) -> s
         return f"[SECURITY BLOCKED] {exc}"
 
 
+class SandboxInput(BaseModel):
+    """Input schema for run_in_sandbox."""
+
+    prompt: str = Field(
+        description=(
+            "Natural-language prompt describing the code to generate and execute "
+            "in Gemini's cloud sandbox. Be specific about: (1) what data to process, "
+            "(2) what logic to apply, (3) what output format to produce. "
+            "Include any inline data the sandbox needs if not using file_path."
+        )
+    )
+    file_path: str = Field(
+        default="",
+        description=(
+            "Optional file path (relative to project root) to upload via Gemini "
+            "File API before execution. Use for large files (CSV, JSON, etc.) that "
+            "cannot be passed inline in the prompt. Leave empty for prompt-only mode."
+        ),
+    )
+
+
+@tool("run_in_sandbox", args_schema=SandboxInput)
+def run_in_sandbox(prompt: str, file_path: str = "") -> str:
+    """Execute code in Gemini's cloud sandbox via code execution API.
+
+    **Evaluator-exclusive tool** for handling complex computation, data
+    processing, or analysis that the Optimizer could not complete with
+    available local tools.
+
+    The sandbox runs Python code in Google's cloud environment with full
+    standard library access and common data science packages (pandas, numpy,
+    matplotlib, etc.).
+
+    Two modes:
+    1. **Prompt-only**: Describe the task; Gemini generates and executes code.
+    2. **File + Prompt**: Upload a large file first, then process it.
+
+    Returns JSON with:
+    - code: the generated Python source code
+    - output: execution stdout/results
+    - error: error message (empty on success)
+
+    The generated code is captured for inclusion in the step report so
+    engineers can review and optionally promote it to scripts/.
+
+    Example (prompt-only):
+        run_in_sandbox(
+            prompt="Parse the following JSON and compute the average price: {...}",
+        )
+
+    Example (file mode):
+        run_in_sandbox(
+            prompt="Read the uploaded CSV and produce a summary with row count, column names, and basic statistics.",
+            file_path="skills/ects_skill/tmp/large_dataset.csv",
+        )
+    """
+    import json as json_mod
+
+    from skills_agent.gemini_sandbox import run_sandbox
+
+    # Validate file_path if provided
+    resolved_file: str | None = None
+    if file_path:
+        candidate = (PROJECT_ROOT / file_path).resolve()
+        scripts_dir = PROJECT_ROOT / "scripts"
+        skills_dir = PROJECT_ROOT / "skills"
+
+        allowed = False
+        if candidate.is_relative_to(scripts_dir):
+            allowed = True
+        elif candidate.is_relative_to(skills_dir):
+            allowed = True
+        if not allowed:
+            return json_mod.dumps({
+                "code": "",
+                "output": "",
+                "error": (
+                    "File path must be inside scripts/ or skills/<skill>/. "
+                    f"Got: {file_path!r}"
+                ),
+            })
+        if not candidate.exists():
+            return json_mod.dumps({
+                "code": "",
+                "output": "",
+                "error": f"File not found: {file_path}",
+            })
+        resolved_file = str(candidate)
+
+    try:
+        result = run_sandbox(prompt=prompt, file_path=resolved_file)
+        return json_mod.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        return json_mod.dumps({
+            "code": "",
+            "output": "",
+            "error": f"Sandbox execution failed: {e}",
+        })
+
+
 class SafePyInput(BaseModel):
     """Input schema for safe_py_runner."""
 
@@ -314,12 +414,13 @@ def safe_py_runner(
 
 ALL_TOOLS = [safe_cli_executor, safe_py_runner]
 READONLY_TOOLS = [safe_cli_executor]  # Read-only inspection
-EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner]  # Evaluator: read + py verification
+EVALUATOR_TOOLS = [safe_cli_executor, safe_py_runner, run_in_sandbox]  # Evaluator: read + py verification + sandbox
 
 # Mapping from tool hint names to actual tool objects for dynamic filtering
 _TOOL_NAME_MAP = {
     "safe_cli_executor": safe_cli_executor,
     "safe_py_runner": safe_py_runner,
+    "run_in_sandbox": run_in_sandbox,
 }
 
 
@@ -396,6 +497,16 @@ def get_tool_descriptions_for_hint(tools_hint: list[str]) -> str:
             lines.append(
                 f'  - tool_name="{name}", params={{ {", ".join(f"{k!r}: <value>" for k in params)} }}: {desc}'
             )
+        lines.append("")
+
+    if "run_in_sandbox" in tools_hint:
+        lines.append("## Evaluator-Exclusive Tool: run_in_sandbox")
+        lines.append("Execute Python code in Gemini's cloud sandbox (code execution API).")
+        lines.append("Use when the Optimizer lacks a critical tool or complex computation is needed.")
+        lines.append("  - prompt (str): Describe what code to generate and execute.")
+        lines.append("  - file_path (str, optional): Path to upload via Gemini File API for large files.")
+        lines.append("Returns JSON: {code, output, error}")
+        lines.append("Generated scripts are captured in reports for engineer review.")
         lines.append("")
 
     lines.append("IMPORTANT: All path values MUST be relative to the PROJECT ROOT.")
