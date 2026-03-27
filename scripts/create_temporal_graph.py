@@ -142,25 +142,148 @@ Return a JSON array of objects with keys: subject, predicate, object
 
 Return ONLY valid JSON, no markdown fences."""
 
+_AGENTIC_CHUNK_SYSTEM = """\
+You are an expert text segmentation assistant.
+Given a full document, split it into semantically coherent chunks. Each chunk
+should represent a self-contained topic, argument, or narrative unit.
+
+Rules:
+- Do NOT split in the middle of a logical argument or closely related sentences.
+- Each chunk should be meaningful on its own.
+- Preserve the original text exactly — do not paraphrase or summarize.
+- Return between 2 and 30 chunks depending on document length.
+
+Return a JSON array of strings, where each string is one semantic chunk.
+
+Return ONLY valid JSON, no markdown fences."""
+
+_CONTEXTUALIZE_SYSTEM = """\
+You are a contextualization assistant.
+You will be given the FULL document and ONE specific chunk extracted from it.
+Your job is to write a brief contextualization statement that explains:
+1. Where this chunk sits in the overall document structure.
+2. What topics or entities were discussed before and after this chunk.
+3. How this chunk relates to the document's main thesis or narrative.
+
+Keep the contextualization concise (2-4 sentences). Write in the same language
+as the document.
+
+Return a JSON object with a single key "contextualization" whose value is the
+contextualization string.
+
+Return ONLY valid JSON, no markdown fences."""
+
 
 # ---------------------------------------------------------------------------
-# Chunking
+# Chunking — Agentic chunking with contextualization
 # ---------------------------------------------------------------------------
 
-def _chunk_text(text: str, max_chunk_size: int = 1500) -> list[str]:
-    """Split text into semantic chunks by paragraph boundaries."""
+def _pre_split(text: str, max_size: int = 3000) -> list[str]:
+    """Pre-split very long text into coarse segments so the LLM can handle them.
+
+    This is a simple paragraph-boundary splitter used only when the input text
+    exceeds the safe prompt size for the agentic chunking LLM call.
+    """
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    chunks: list[str] = []
+    segments: list[str] = []
     current = ""
     for para in paragraphs:
-        if len(current) + len(para) + 2 > max_chunk_size and current:
-            chunks.append(current)
+        if len(current) + len(para) + 2 > max_size and current:
+            segments.append(current)
             current = para
         else:
             current = f"{current}\n\n{para}" if current else para
     if current:
-        chunks.append(current)
-    return chunks if chunks else [text]
+        segments.append(current)
+    return segments if segments else [text]
+
+
+def _agentic_chunk(client, text: str) -> list[str]:
+    """Use the LLM to split *text* into semantically coherent chunks.
+
+    For very long documents the text is first coarsely pre-split so that each
+    LLM call stays within a comfortable prompt size, then the per-segment
+    semantic chunks are concatenated.
+    """
+    MAX_LLM_INPUT = 6000  # characters — conservative limit for one call
+
+    if len(text) <= MAX_LLM_INPUT:
+        segments = [text]
+    else:
+        segments = _pre_split(text, max_size=MAX_LLM_INPUT)
+
+    all_chunks: list[str] = []
+    for seg in segments:
+        try:
+            chunks = _llm_json_call(client, _AGENTIC_CHUNK_SYSTEM, seg)
+            if isinstance(chunks, list):
+                all_chunks.extend([c for c in chunks if isinstance(c, str) and c.strip()])
+            else:
+                # Fallback: treat the whole segment as one chunk
+                all_chunks.append(seg)
+        except Exception as exc:
+            print(f"WARN: Agentic chunking failed for segment, falling back: {exc}", file=sys.stderr)
+            all_chunks.append(seg)
+
+    return all_chunks if all_chunks else [text]
+
+
+def _contextualize_chunk(client, full_text: str, chunk: str) -> str:
+    """Ask the LLM to produce a contextualization statement for *chunk*
+    given the full document.
+
+    Returns the contextualization string.
+    """
+    # Truncate full_text if it is very long to fit in prompt
+    MAX_CONTEXT_LEN = 8000
+    context_text = full_text if len(full_text) <= MAX_CONTEXT_LEN else (
+        full_text[:MAX_CONTEXT_LEN // 2] + "\n\n[...truncated...]\n\n" + full_text[-MAX_CONTEXT_LEN // 2:]
+    )
+    user_prompt = (
+        f"=== FULL DOCUMENT ===\n{context_text}\n\n"
+        f"=== CHUNK TO CONTEXTUALIZE ===\n{chunk}"
+    )
+    try:
+        result = _llm_json_call(client, _CONTEXTUALIZE_SYSTEM, user_prompt)
+        if isinstance(result, dict):
+            return result.get("contextualization", "")
+        return ""
+    except Exception as exc:
+        print(f"WARN: Contextualization failed: {exc}", file=sys.stderr)
+        return ""
+
+
+def _chunk_text(text: str, _max_chunk_size: int = 1500) -> list[dict]:
+    """Split text into semantic chunks via agentic chunking, then
+    contextualize each chunk.
+
+    Returns a list of dicts, each with keys:
+        - contextualization: str  — how this chunk relates to the whole document
+        - chunk: str              — the original semantic chunk text
+        - text: str               — the combined representation used downstream
+    """
+    client = _get_llm_client()
+
+    # Step 1: Agentic chunking — LLM-driven semantic segmentation
+    raw_chunks = _agentic_chunk(client, text)
+    print(f"Agentic chunking produced {len(raw_chunks)} semantic chunks.")
+
+    # Step 2: Contextualization — enrich each chunk with document-level context
+    enriched: list[dict] = []
+    for idx, chunk in enumerate(raw_chunks):
+        ctx = _contextualize_chunk(client, text, chunk)
+        combined = (
+            f"[Contextualization: {ctx}]\n[Agentic chunking: {chunk}]"
+            if ctx else chunk
+        )
+        enriched.append({
+            "contextualization": ctx,
+            "chunk": chunk,
+            "text": combined,
+        })
+        print(f"  Chunk {idx+1}/{len(raw_chunks)} contextualized.")
+
+    return enriched if enriched else [{"contextualization": "", "chunk": text, "text": text}]
 
 
 # ---------------------------------------------------------------------------
@@ -250,17 +373,18 @@ def build_temporal_graph(
     client = _get_llm_client()
     G = nx.DiGraph()
 
-    # --- Chunk ---
-    chunks = _chunk_text(text)
-    print(f"Chunked input into {len(chunks)} segments.")
+    # --- Chunk (agentic chunking + contextualization) ---
+    chunk_records = _chunk_text(text)
+    print(f"Chunked input into {len(chunk_records)} segments.")
 
     # --- Stage 1: Extract statements ---
     all_statements: list[dict] = []
     all_entities: list[str] = []
-    for i, chunk in enumerate(chunks):
-        stmts = _extract_statements(client, chunk)
+    for i, chunk_rec in enumerate(chunk_records):
+        stmts = _extract_statements(client, chunk_rec["text"])
         for s in stmts:
             s["chunk_idx"] = i
+            s["contextualization"] = chunk_rec.get("contextualization", "")
         all_statements.extend(stmts)
         for s in stmts:
             all_entities.extend(s.get("entities", []))
@@ -328,6 +452,7 @@ def build_temporal_graph(
                 t_expired=t_expired,
                 source_type=source_type,
                 chunk_idx=stmt.get("chunk_idx", 0),
+                contextualization=stmt.get("contextualization", ""),
             )
             edge_id += 1
 
