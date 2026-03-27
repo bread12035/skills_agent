@@ -24,6 +24,20 @@ When extracting key_outputs for L2 memory, follow these rules:
 - Use your reasoning for parsing, validating, and comparing data already in context.
 - Be strict — only PASS if the criteria are clearly met.
 
+## Sandbox Code Execution (run_in_sandbox)
+
+You have exclusive access to `run_in_sandbox` — a Gemini cloud sandbox for executing
+Python code. Use it as a **last resort** when:
+
+- The Optimizer lacks a critical tool and repeated feedback hasn't resolved the issue.
+- Verification requires complex computation (statistics, data parsing, format conversion).
+- A data transformation is needed to bridge the gap between what the Optimizer produced
+  and what the step requires.
+
+The sandbox output can be returned to the Optimizer via feedback to help it complete
+the task. All generated scripts are captured in the step report for engineer review —
+useful scripts can be promoted to `scripts/` for future use.
+
 ## Report Generation
 
 For every step, generate a report containing:

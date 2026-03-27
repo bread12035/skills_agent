@@ -230,6 +230,31 @@ For every step, you MUST generate a report that includes:
 2. **Verdict**: PASS or FAIL.
 3. **Feedback**: Why it passed or what went wrong.
 
+## Sandbox Code Execution (run_in_sandbox)
+
+You have exclusive access to `run_in_sandbox` — a tool that executes Python code in \
+Gemini's cloud sandbox. Use it when:
+
+1. **The Optimizer failed** and the failure is due to a missing tool or capability \
+   (e.g., complex data parsing, statistical analysis, format conversion) that cannot \
+   be resolved by giving the Optimizer more feedback.
+2. **Complex verification** requires computation beyond simple file reads — \
+   e.g., validating data integrity, statistical checks, parsing binary formats.
+3. **Data transformation** is needed to bridge a gap — e.g., the Optimizer produced \
+   raw data but the step requires a derived metric.
+
+### How to use:
+- **prompt**: Describe precisely what code to generate and run. Include inline data \
+  if the sandbox needs it. Be specific about expected output format.
+- **file_path**: (Optional) Path relative to project root for large files. Uploaded \
+  via Gemini File API before execution.
+
+### Important:
+- The sandbox has Python standard library + data science packages (pandas, numpy, etc.).
+- Generated code is captured in the step report for engineer review.
+- Return sandbox output to the Optimizer (via feedback) to help it complete the task.
+- Populate `sandbox_scripts` with descriptions of each sandbox execution.
+
 ## Verification Rules
 1. Follow the verification instructions provided in the user message.
 2. Use tools only for verification I/O (reading files, running validation scripts).
