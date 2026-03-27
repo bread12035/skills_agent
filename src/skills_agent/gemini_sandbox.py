@@ -1,31 +1,18 @@
-"""Gemini Code Execution Sandbox — execute code in Google's cloud sandbox.
+"""Gemini Code Execution Sandbox — internal module for evaluator-exclusive sandbox tool.
 
 Leverages Gemini's native code execution tool to run Python code in a secure
-cloud sandbox environment. Supports two input modes:
+cloud sandbox environment. This module is NOT a standalone script — it lives
+inside src/skills_agent/ to prevent Optimizer access via safe_py_runner.
 
+Called exclusively by the run_in_sandbox tool (evaluator-only).
+
+Supports two input modes:
 1. **Prompt mode**: Pass a natural-language prompt describing the code to
-   generate and execute (via stdin).
+   generate and execute.
 2. **File mode**: Upload a large file via Gemini File API, then reference it
    in the prompt for processing.
 
-The sandbox returns both the generated code and its execution output (stdout,
-generated artifacts, etc.).
-
-Usage (called via run_in_sandbox tool or safe_py_runner):
-    # Prompt-only mode
-    safe_py_runner(
-        script_name="scripts/gemini_sandbox.py",
-        stdin_text="Write a Python script that calculates fibonacci(20)",
-    )
-
-    # File mode — upload a file then process it
-    safe_py_runner(
-        script_name="scripts/gemini_sandbox.py",
-        args=["--file", "skills/ects_skill/tmp/large_data.csv"],
-        stdin_text="Parse the uploaded CSV and compute summary statistics",
-    )
-
-Output: Prints JSON to stdout with keys:
+Returns dict with keys:
     - code: the generated Python code
     - output: execution output (stdout/stderr from sandbox)
     - error: error message if execution failed (empty string on success)
@@ -33,9 +20,7 @@ Output: Prints JSON to stdout with keys:
 
 from __future__ import annotations
 
-import json
 import os
-import sys
 import time
 
 from google import genai
@@ -188,41 +173,3 @@ def run_sandbox(
         "output": output,
         "error": "",
     }
-
-
-def main() -> None:
-    """CLI entry point.
-
-    Reads prompt from stdin. Optional flags:
-        --file <path>   Upload a file before executing the prompt.
-    """
-    file_path = None
-
-    # Parse args
-    args = sys.argv[1:]
-    i = 0
-    while i < len(args):
-        if args[i] == "--file" and i + 1 < len(args):
-            file_path = args[i + 1]
-            i += 2
-        else:
-            i += 1
-
-    # Read prompt from stdin
-    prompt = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
-    if not prompt:
-        print(
-            json.dumps({
-                "code": "",
-                "output": "",
-                "error": "No prompt provided. Pass prompt via stdin.",
-            })
-        )
-        sys.exit(1)
-
-    result = run_sandbox(prompt=prompt, file_path=file_path)
-    print(json.dumps(result, ensure_ascii=False))
-
-
-if __name__ == "__main__":
-    main()

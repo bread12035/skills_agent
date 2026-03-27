@@ -217,9 +217,11 @@ def run_in_sandbox(prompt: str, file_path: str = "") -> str:
         )
     """
     import json as json_mod
-    import os
+
+    from skills_agent.gemini_sandbox import run_sandbox
 
     # Validate file_path if provided
+    resolved_file: str | None = None
     if file_path:
         candidate = (PROJECT_ROOT / file_path).resolve()
         scripts_dir = PROJECT_ROOT / "scripts"
@@ -245,47 +247,16 @@ def run_in_sandbox(prompt: str, file_path: str = "") -> str:
                 "output": "",
                 "error": f"File not found: {file_path}",
             })
-
-    # Build command to run gemini_sandbox.py
-    script_path = str(PROJECT_ROOT / "scripts" / "gemini_sandbox.py")
-    cmd = ["python", script_path]
-    if file_path:
-        abs_file = str((PROJECT_ROOT / file_path).resolve())
-        cmd.extend(["--file", abs_file])
-
-    env = {**os.environ}
-    for key in ("GEMINI_API_KEY",):
-        if key in os.environ:
-            env[key] = os.environ[key]
+        resolved_file = str(candidate)
 
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min timeout for sandbox execution
-            env=env,
-            cwd=str(PROJECT_ROOT),
-        )
-        output = result.stdout.strip()
-        if result.returncode != 0:
-            stderr = result.stderr.strip() if result.stderr else ""
-            return json_mod.dumps({
-                "code": "",
-                "output": output,
-                "error": f"Sandbox script failed (exit {result.returncode}): {stderr}",
-            })
-        return output if output else json_mod.dumps({
-            "code": "",
-            "output": "",
-            "error": "No output from sandbox",
-        })
-    except subprocess.TimeoutExpired:
+        result = run_sandbox(prompt=prompt, file_path=resolved_file)
+        return json_mod.dumps(result, ensure_ascii=False)
+    except Exception as e:
         return json_mod.dumps({
             "code": "",
             "output": "",
-            "error": "Sandbox execution timed out after 300s",
+            "error": f"Sandbox execution failed: {e}",
         })
 
 
