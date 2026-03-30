@@ -1,0 +1,65 @@
+{
+  "analysis_layers": {
+    "entity_list": {
+      "lateral": [
+        "BIS Entity List additions China semiconductors 2024 2025 2026",
+        "Huawei TSMC export license status 2025 2026",
+        "Biren Moore Threads SMIC Entity List semiconductor 2025",
+        "China military end user list semiconductor restrictions 2025 2026"
+      ],
+      "longitudinal": [
+        "Entity List China semiconductor additions timeline 2023 2024 2025 2026",
+        "Huawei chip supply chain restrictions evolution 2023 2026"
+      ]
+    },
+    "chips_act": {
+      "lateral": [
+        "CHIPS Act guardrails China expansion restrictions TSMC 2025 2026",
+        "CHIPS Act fab investment China restrictions semiconductor 2025",
+        "CHIPS Act Section 103 foreign entity of concern restrictions 2025",
+        "TSMC Arizona CHIPS Act funding conditions China restrictions"
+      ],
+      "longitudinal": [
+        "CHIPS Act guardrails rulemaking timeline 2023 2024 2025 2026",
+        "CHIPS Act national security guardrails final rule updates"
+      ]
+    },
+    "c79_veu": {
+      "lateral": [
+        "TSMC Nanjing fab C79 license renewal 2025 2026",
+        "Validated End-User VEU program semiconductor 2025 2026",
+        "TSMC China operations export license annual renewal status",
+        "C79 fab license scope mature process node restrictions 2026"
+      ],
+      "longitudinal": [
+        "TSMC China license C79 status history 2023 2024 2025 2026",
+        "VEU authorization semiconductor China program changes 2023 2026"
+      ]
+    },
+    "tpp_pd": {
+      "lateral": [
+        "BIS TPP Total Processing Performance threshold update 2024 2025",
+        "performance density PD limit semiconductor export control 2025 2026",
+        "Nvidia AI chip export control TPP thresholds 2025",
+        "EAR 744.23 advanced computing rule current thresholds 2026",
+        "semiconductor export control computing power density limits 2025 2026"
+      ],
+      "longitudinal": [
+        "EAR 744.23 advanced computing rule history 2023 2024 2025",
+        "October 2022 October 2023 January 2025 semiconductor export control updates",
+        "TPP threshold evolution 4800 to density based limits timeline"
+      ]
+    }
+  },
+  "supplemental": [
+    "BIS interim final rule semiconductor export controls 2025",
+    "Federal Register advanced computing semiconductor export 2024 2025",
+    "TSMC 2026 compliance statement annual report export controls",
+    "US Commerce Department semiconductor China policy 2026"
+  ],
+  "parameters": {
+    "time_range": "2023-2026",
+    "reference_date": "2026-03-30",
+    "target_entity": "TSMC"
+  }
+}
