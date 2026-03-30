@@ -1,0 +1,20 @@
+{
+  "company": "AAPL",
+  "company_name": "Apple Inc.",
+  "base_url": "https://investor.apple.com",
+  "fiscal_year_end": "September",
+  "quarter_calendar_mapping": {
+    "Q1": "Oct-Dec (prior calendar year)",
+    "Q2": "Jan-Mar",
+    "Q3": "Apr-Jun",
+    "Q4": "Jul-Sep"
+  },
+  "quarterly_report_url_pattern": "https://investor.apple.com/sec-filings/quarterly-reports/FY{fiscal_year}Q{quarter_number}",
+  "press_release_url_pattern": "https://investor.apple.com/press-releases/press-release-details/FY{fiscal_year}Q{quarter_number}",
+  "financial_statements": {
+    "income_statement": "https://investor.apple.com/financial-data/income-statement",
+    "balance_sheet": "https://investor.apple.com/financial-data/balance-sheet",
+    "cash_flow": "https://investor.apple.com/financial-data/cash-flow"
+  },
+  "notes": "Apple fiscal year ends in September. FY Q1 = Oct-Dec, Q2 = Jan-Mar, Q3 = Apr-Jun, Q4 = Jul-Sep. When deriving previous quarter from Q1, roll back to prior fiscal year Q4."
+}
