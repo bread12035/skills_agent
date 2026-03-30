@@ -96,6 +96,25 @@ cli_whitelist:
 #   - scripts/create_temporal_graph.py  — Build temporal graph from text. args=[skill_name, input_path_or_text, --source-type, --reference-date]
 #   - scripts/inference_with_graph.py   — Query temporal graph. args=[skill_name, query, --entry-nodes, --as-of, --max-hops, --top-k, --no-synthesize]
 
+# TSMC Compliance Temporal Analyzer Skill
+# Combines web_search + create_temporal_graph + inference_with_graph to analyze
+# TSMC's 2026 export compliance status across four analysis layers:
+#   - Computing Power (TPP thresholds)
+#   - Performance Density (PD limits)
+#   - Process Node (FinFET/GAAFET/nm restrictions)
+#   - End-User (Entity List, C79/VEU exemptions)
+#
+# Skill definition: skills/tsmc_compliance/skills.md
+# Artifacts:        skills/tsmc_compliance/tmp/
+# Reference:        skills/tsmc_compliance/reference/
+#
+# Tools used:
+#   - scripts/web_search.py              — Lateral & longitudinal regulation search
+#   - scripts/create_temporal_graph.py   — Build temporal graph from consolidated search data
+#   - scripts/inference_with_graph.py    — Query graph with --as-of 2026-03-30 temporal filter
+#   - scripts/write_file.py             — Write consolidated data and final report
+#   - scripts/read.py                   — Read intermediate artifacts for verification
+
 # Blocked patterns — commands that must NEVER be executed
 blocked_patterns:
   - "rm\\s+-rf"
